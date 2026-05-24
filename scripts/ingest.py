@@ -75,83 +75,95 @@ def download_csv_attachment(service, message_id):
 
 def parse_ibkr_csv(csv_bytes):
     """
-    Parse an IBKR Activity Statement CSV.
+    Parse an IBKR Flex Query Daily Activity CSV.
 
-    IBKR CSVs are multi-section: each row starts with a section name.
-    We extract only the 'Trades' / 'Data' / 'Order' rows for Stocks.
+    The file contains multiple sections with different schemas concatenated.
+    We read only the first section (trades) using the first header row,
+    then filter to EXECUTION rows for stocks.
     """
-    csv_bytes.seek(0)
-    raw = pd.read_csv(csv_bytes, header=None, dtype=str, on_bad_lines="skip")
+    # Try common encodings — IBKR CSVs sometimes use latin-1
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            csv_bytes.seek(0)
+            raw = pd.read_csv(
+                csv_bytes,
+                header=0,
+                dtype=str,
+                on_bad_lines="skip",
+                encoding=encoding,
+            )
+            break
+        except UnicodeDecodeError:
+            continue
 
-    # Find the Trades header row to get column names
-    header_mask = (raw[0] == "Trades") & (raw[1] == "Header")
-    if not header_mask.any():
-        print("  No Trades section found in this CSV.")
+    # Keep only the trade section columns (first header row defines them)
+    # The file has extra header rows mid-file for other sections — drop them
+    # by requiring the EXECUTION LevelOfDetail value
+    if "LevelOfDetail" not in raw.columns:
+        print("  Unexpected CSV format — LevelOfDetail column not found.")
+        print(f"  Columns found: {list(raw.columns)}")
         return pd.DataFrame()
 
-    header_row = raw[header_mask].iloc[0]
-    columns = header_row.tolist()
+    executions = raw[
+        (raw["LevelOfDetail"].str.strip() == "EXECUTION") &
+        (raw["AssetClass"].str.strip() == "STK")
+    ].copy()
 
-    # Extract data rows: Trades / Data / Order (actual filled orders)
-    data_mask = (raw[0] == "Trades") & (raw[1] == "Data") & (raw[2] == "Order")
-    trades_raw = raw[data_mask].copy()
-
-    if trades_raw.empty:
-        print("  No trade data rows found.")
+    if executions.empty:
+        print("  No EXECUTION rows found for STK.")
         return pd.DataFrame()
 
-    trades_raw.columns = range(len(raw.columns))
-    trades_raw = trades_raw.iloc[:, : len(columns)]
-    trades_raw.columns = columns
-
-    # Filter stocks only
-    if "Asset Category" in trades_raw.columns:
-        trades_raw = trades_raw[trades_raw["Asset Category"].str.strip() == "Stocks"]
-
-    return trades_raw
+    return executions
 
 
 def make_trade_id(row):
-    """Stable dedup key: hash of date + symbol + qty + price."""
+    """Use IBKR TradeID when available, else hash key fields."""
+    if row.get("ibkr_trade_id") and str(row["ibkr_trade_id"]).strip():
+        return str(row["ibkr_trade_id"]).strip()
     key = f"{row['trade_date']}|{row['symbol']}|{row['quantity']}|{row['price']}"
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
-def transform(trades_raw):
-    """Map IBKR columns to our schema and return a list of dicts."""
-    if trades_raw.empty:
+def transform(executions):
+    """Map IBKR Flex Query columns to our schema and return a list of dicts."""
+    if executions.empty:
         return []
 
-    col = {c.strip(): c for c in trades_raw.columns}  # strip-safe lookup
-
-    def get(df, name):
-        return df[col[name]].str.strip() if name in col else None
+    def col(name):
+        return executions[name].str.strip() if name in executions.columns else None
 
     df = pd.DataFrame()
-    df["symbol"] = get(trades_raw, "Symbol")
-    df["trade_date"] = (
-        pd.to_datetime(get(trades_raw, "Date/Time"), errors="coerce")
-        .dt.date.astype(str)
-    )
-    df["quantity"] = pd.to_numeric(get(trades_raw, "Quantity"), errors="coerce")
-    df["price"] = pd.to_numeric(get(trades_raw, "T. Price"), errors="coerce")
-    df["proceeds"] = pd.to_numeric(get(trades_raw, "Proceeds"), errors="coerce")
-    df["commission"] = pd.to_numeric(get(trades_raw, "Comm/Fee"), errors="coerce")
-    df["realized_pnl"] = pd.to_numeric(get(trades_raw, "Realized P&L"), errors="coerce")
-    df["currency"] = get(trades_raw, "Currency") if "Currency" in col else "USD"
+    df["symbol"]       = col("Symbol")
+    df["ibkr_trade_id"] = col("TradeID")
+    df["action"]       = col("Buy/Sell")
+    df["currency"]     = col("CurrencyPrimary")
 
-    # Derive BUY/SELL from quantity sign
-    df["action"] = df["quantity"].apply(lambda q: "BUY" if q > 0 else "SELL")
-    df["quantity"] = df["quantity"].abs()
+    # DateTime format from Flex: "05/19/2026,10:20:16"
+    dt = pd.to_datetime(col("DateTime"), format="%m/%d/%Y,%H:%M:%S", errors="coerce")
+    df["trade_date"] = dt.dt.date.astype(str)
+
+    df["quantity"]     = pd.to_numeric(col("Quantity"), errors="coerce").abs()
+    df["price"]        = pd.to_numeric(col("TradePrice"), errors="coerce")
+    df["proceeds"]     = pd.to_numeric(col("NetCash"), errors="coerce")
+    df["commission"]   = pd.to_numeric(col("IBCommission"), errors="coerce")
+    df["realized_pnl"] = pd.to_numeric(col("FifoPnlRealized"), errors="coerce")
 
     df.dropna(subset=["symbol", "trade_date", "quantity", "price"], inplace=True)
     df["trade_id"] = df.apply(make_trade_id, axis=1)
+    df.drop(columns=["ibkr_trade_id"], inplace=True)
 
     return df.to_dict(orient="records")
 
 
 def upsert_to_supabase(records):
-    client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    url = os.environ["SUPABASE_URL"]
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    if not key.startswith("eyJ"):
+        raise ValueError(
+            "SUPABASE_SERVICE_KEY looks wrong — make sure you copied the "
+            "'service_role' key (not the 'anon' key) from Supabase Settings → API."
+        )
+    client = create_client(url, key)
     if not records:
         return 0
     client.table("trades").upsert(records, on_conflict="trade_id").execute()
