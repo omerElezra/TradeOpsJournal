@@ -116,39 +116,60 @@ def parse_ibkr_csv(csv_bytes):
     return executions
 
 
+FLEX_DT_FORMAT = "%m/%d/%Y,%H:%M:%S"
+
+
+def parse_flex_dt(series):
+    """Parse IBKR Flex datetime string '05/19/2026,10:20:16' → datetime."""
+    return pd.to_datetime(series, format=FLEX_DT_FORMAT, errors="coerce")
+
+
 def make_trade_id(row):
-    """Use IBKR TradeID when available, else hash key fields."""
+    """Use IBKR TradeID when available, else hash order_time + symbol + qty + price."""
     if row.get("ibkr_trade_id") and str(row["ibkr_trade_id"]).strip():
         return str(row["ibkr_trade_id"]).strip()
-    key = f"{row['trade_date']}|{row['symbol']}|{row['quantity']}|{row['price']}"
+    key = f"{row['order_time']}|{row['symbol']}|{row['quantity']}|{row['price']}"
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
 def transform(executions):
-    """Map IBKR Flex Query columns to our schema and return a list of dicts."""
+    """
+    Map IBKR Flex Query columns → DB schema.
+
+    Sorted by OrderTime so same-symbol trades on the same day appear in
+    chronological order (buy → sell → buy again are distinct rows).
+    trade_date is derived from OrderTime (when the order was placed).
+    """
     if executions.empty:
         return []
 
     def col(name):
-        return executions[name].str.strip() if name in executions.columns else None
+        return executions[name].str.strip() if name in executions.columns else pd.Series(
+            [""] * len(executions), index=executions.index
+        )
 
-    df = pd.DataFrame()
-    df["symbol"]       = col("Symbol")
+    df = pd.DataFrame(index=executions.index)
+    df["symbol"]        = col("Symbol")
     df["ibkr_trade_id"] = col("TradeID")
-    df["action"]       = col("Buy/Sell")
-    df["currency"]     = col("CurrencyPrimary")
+    df["action"]        = col("Buy/Sell")
+    df["currency"]      = col("CurrencyPrimary")
 
-    # DateTime format from Flex: "05/19/2026,10:20:16"
-    dt = pd.to_datetime(col("DateTime"), format="%m/%d/%Y,%H:%M:%S", errors="coerce")
-    df["trade_date"] = dt.dt.date.astype(str)
+    # OrderTime: when order was placed — use for trade_date + sorting
+    order_dt            = parse_flex_dt(col("OrderTime"))
+    df["order_time"]    = order_dt.dt.strftime("%Y-%m-%dT%H:%M:%S")  # ISO for Supabase
+    df["trade_date"]    = order_dt.dt.date.astype(str)
 
-    df["quantity"]     = pd.to_numeric(col("Quantity"), errors="coerce").abs()
-    df["price"]        = pd.to_numeric(col("TradePrice"), errors="coerce")
-    df["proceeds"]     = pd.to_numeric(col("NetCash"), errors="coerce")
-    df["commission"]   = pd.to_numeric(col("IBCommission"), errors="coerce")
-    df["realized_pnl"] = pd.to_numeric(col("FifoPnlRealized"), errors="coerce")
+    df["quantity"]      = pd.to_numeric(col("Quantity"), errors="coerce").abs()
+    df["price"]         = pd.to_numeric(col("TradePrice"), errors="coerce")
+    df["proceeds"]      = pd.to_numeric(col("NetCash"), errors="coerce")
+    df["commission"]    = pd.to_numeric(col("IBCommission"), errors="coerce")
+    df["realized_pnl"]  = pd.to_numeric(col("FifoPnlRealized"), errors="coerce")
 
     df.dropna(subset=["symbol", "trade_date", "quantity", "price"], inplace=True)
+
+    # Sort by OrderTime — preserves chronological order for repeated same-symbol trades
+    df.sort_values("order_time", inplace=True)
+
     df["trade_id"] = df.apply(make_trade_id, axis=1)
     df.drop(columns=["ibkr_trade_id"], inplace=True)
 
@@ -189,15 +210,16 @@ def upsert_to_supabase(client, records):
 def print_trade_table(records, existing_ids):
     """Print a formatted table of trades with NEW / DUPLICATE status."""
     print()
-    print(f"  {'#':<4} {'Date':<12} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Commission':>11}  {'Status'}")
-    print("  " + "-" * 82)
+    print(f"  {'#':<4} {'OrderTime':<20} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Comm':>7}  {'Status'}")
+    print("  " + "-" * 90)
     for i, r in enumerate(records, 1):
-        status = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
-        pnl    = r.get("realized_pnl") or 0
-        comm   = r.get("commission") or 0
+        status    = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
+        pnl       = r.get("realized_pnl") or 0
+        comm      = r.get("commission") or 0
+        order_t   = (r.get("order_time") or r.get("trade_date", ""))[:19].replace("T", " ")
         print(
-            f"  {i:<4} {r['trade_date']:<12} {r['symbol']:<8} {r['action']:<5} "
-            f"{r['quantity']:>7.0f} {r['price']:>9.4f} {pnl:>+10.2f} {comm:>11.2f}  {status}"
+            f"  {i:<4} {order_t:<20} {r['symbol']:<8} {r['action']:<5} "
+            f"{r['quantity']:>7.0f} {r['price']:>9.4f} {pnl:>+10.2f} {comm:>7.2f}  {status}"
         )
     print()
 
