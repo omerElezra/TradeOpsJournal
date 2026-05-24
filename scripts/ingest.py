@@ -23,8 +23,8 @@ load_dotenv()
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-# IBKR sends from this address — adjust if yours differs
-IBKR_SENDER = "no-reply@interactivebrokers.com"
+IBKR_SENDER = "Info@inter-il.com"
+IBKR_SUBJECT = "Activity Flex"
 
 
 def build_gmail_client():
@@ -40,9 +40,9 @@ def build_gmail_client():
     return build("gmail", "v1", credentials=creds)
 
 
-def find_ibkr_emails(service, days_back=2):
+def find_ibkr_emails(service, days_back=5):
     """Return message IDs of recent IBKR emails with CSV attachments."""
-    query = f"from:{IBKR_SENDER} has:attachment filename:csv newer_than:{days_back}d"
+    query = f"from:{IBKR_SENDER} subject:{IBKR_SUBJECT} has:attachment newer_than:{days_back}d"
     result = service.users().messages().list(userId="me", q=query).execute()
     return result.get("messages", [])
 
