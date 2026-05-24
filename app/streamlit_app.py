@@ -3,7 +3,6 @@ from datetime import date, timedelta
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
@@ -27,13 +26,14 @@ def load_trades(start: str, end: str) -> pd.DataFrame:
         .select("*")
         .gte("trade_date", start)
         .lte("trade_date", end)
-        .order("trade_date")
+        .order("exec_time")
         .execute()
     )
     if not res.data:
         return pd.DataFrame()
     df = pd.DataFrame(res.data)
-    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df["exec_time"]  = pd.to_datetime(df["exec_time"],  errors="coerce")
+    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce").dt.date
     for col in ["quantity", "price", "proceeds", "commission", "realized_pnl"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -42,7 +42,7 @@ def load_trades(start: str, end: str) -> pd.DataFrame:
 
 # ── Sidebar — date range ───────────────────────────────────────────────────────
 
-st.sidebar.title("Trading Journal")
+st.sidebar.title("📈 Trading Journal")
 st.sidebar.markdown("---")
 
 today = date.today()
@@ -65,7 +65,7 @@ elif quick == "YTD":
     end_date = today
 else:
     start_date = st.sidebar.date_input("From", today - timedelta(days=30))
-    end_date = st.sidebar.date_input("To", today)
+    end_date   = st.sidebar.date_input("To",   today)
 
 st.sidebar.markdown(f"**{start_date}** → **{end_date}**")
 
@@ -81,24 +81,24 @@ if df.empty:
 
 # ── Summary metrics ────────────────────────────────────────────────────────────
 
-total_pnl = df["realized_pnl"].sum()
+total_pnl        = df["realized_pnl"].sum()
 total_commission = df["commission"].sum()
-num_trades = len(df)
+num_trades       = len(df)
 
-closed = df[df["realized_pnl"].notna() & (df["realized_pnl"] != 0)]
-wins = (closed["realized_pnl"] > 0).sum()
+closed   = df[df["realized_pnl"].notna() & (df["realized_pnl"] != 0)]
+wins     = (closed["realized_pnl"] > 0).sum()
 win_rate = (wins / len(closed) * 100) if len(closed) > 0 else 0
 
-daily = df.groupby("trade_date")["realized_pnl"].sum()
-best_day = daily.max() if not daily.empty else 0
+daily     = df.groupby("trade_date")["realized_pnl"].sum()
+best_day  = daily.max() if not daily.empty else 0
 worst_day = daily.min() if not daily.empty else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Total P&L", f"${total_pnl:,.2f}", delta=None)
-c2.metric("Win Rate", f"{win_rate:.1f}%")
-c3.metric("# Trades", num_trades)
-c4.metric("Best Day", f"${best_day:,.2f}")
-c5.metric("Worst Day", f"${worst_day:,.2f}")
+c1.metric("Total P&L",  f"${total_pnl:,.2f}")
+c2.metric("Win Rate",   f"{win_rate:.1f}%")
+c3.metric("# Trades",   num_trades)
+c4.metric("Best Day",   f"${best_day:,.2f}")
+c5.metric("Worst Day",  f"${worst_day:,.2f}")
 
 st.markdown("---")
 
@@ -111,9 +111,7 @@ with col_left:
     daily_df = daily.reset_index()
     daily_df.columns = ["Date", "P&L"]
     fig = px.bar(
-        daily_df,
-        x="Date",
-        y="P&L",
+        daily_df, x="Date", y="P&L",
         color="P&L",
         color_continuous_scale=["#e74c3c", "#2ecc71"],
         color_continuous_midpoint=0,
@@ -141,10 +139,7 @@ sym_pnl = (
 )
 sym_pnl.columns = ["Symbol", "P&L"]
 fig3 = px.bar(
-    sym_pnl,
-    x="P&L",
-    y="Symbol",
-    orientation="h",
+    sym_pnl, x="P&L", y="Symbol", orientation="h",
     color="P&L",
     color_continuous_scale=["#e74c3c", "#2ecc71"],
     color_continuous_midpoint=0,
@@ -158,21 +153,24 @@ st.markdown("---")
 
 st.subheader("Trade Log")
 
-display = df[["trade_date", "symbol", "action", "quantity", "price", "proceeds", "commission", "realized_pnl"]].copy()
-display = display.sort_values("trade_date", ascending=False)
-display.columns = ["Date", "Symbol", "Action", "Qty", "Price", "Proceeds", "Commission", "Realized P&L"]
+display = df[[
+    "exec_time", "symbol", "action",
+    "quantity", "price", "proceeds", "commission", "realized_pnl"
+]].copy()
+display = display.sort_values("exec_time", ascending=False)
+display.columns = ["DateTime", "Symbol", "Action", "Qty", "Price", "Proceeds", "Commission", "Realized P&L"]
 
 st.dataframe(
     display,
     use_container_width=True,
     column_config={
-        "Date": st.column_config.DateColumn(format="YYYY-MM-DD"),
-        "Price": st.column_config.NumberColumn(format="$%.4f"),
-        "Proceeds": st.column_config.NumberColumn(format="$%.2f"),
-        "Commission": st.column_config.NumberColumn(format="$%.2f"),
-        "Realized P&L": st.column_config.NumberColumn(format="$%.2f"),
+        "DateTime":      st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss"),
+        "Price":         st.column_config.NumberColumn(format="$%.4f"),
+        "Proceeds":      st.column_config.NumberColumn(format="$%.2f"),
+        "Commission":    st.column_config.NumberColumn(format="$%.2f"),
+        "Realized P&L":  st.column_config.NumberColumn(format="$%.2f"),
     },
     hide_index=True,
 )
 
-st.caption(f"Showing {len(df)} trades from {start_date} to {end_date}. Data refreshes every 5 minutes.")
+st.caption(f"Showing {len(df)} trades · {start_date} → {end_date} · refreshes every 5 min")

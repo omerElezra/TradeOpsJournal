@@ -146,10 +146,10 @@ def parse_flex_dt(series):
 
 
 def make_trade_id(row):
-    """Use IBKR TradeID when available, else hash order_time + symbol + qty + price."""
+    """Use IBKR TradeID when available, else hash exec_time + symbol + qty + price."""
     if row.get("ibkr_trade_id") and str(row["ibkr_trade_id"]).strip():
         return str(row["ibkr_trade_id"]).strip()
-    key = f"{row['order_time']}|{row['symbol']}|{row['quantity']}|{row['price']}"
+    key = f"{row.get('exec_time','')}|{row['symbol']}|{row['quantity']}|{row['price']}"
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
@@ -214,7 +214,7 @@ def transform_cash(cash_rows):
     ts       = exec_dt.combine_first(order_dt)
 
     df["transaction_date"] = ts.dt.date.astype(str)
-    df["order_time"]       = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
+    df["exec_time"]       = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
 
     df["quantity"]  = pd.to_numeric(col("Quantity"),    errors="coerce").abs()
     df["rate"]      = pd.to_numeric(col("TradePrice"),  errors="coerce")   # FX rate
@@ -222,13 +222,13 @@ def transform_cash(cash_rows):
     df["commission"]= pd.to_numeric(col("IBCommission"),errors="coerce")
 
     df.dropna(subset=["symbol", "transaction_date", "quantity"], inplace=True)
-    df.sort_values("order_time", inplace=True)
+    df.sort_values("exec_time", inplace=True)
 
     # Stable dedup key — prefer IBKR TradeID
     def make_cash_id(row):
         if row.get("ibkr_trade_id") and str(row["ibkr_trade_id"]).strip():
             return f"cash_{row['ibkr_trade_id'].strip()}"
-        key = f"cash|{row['order_time']}|{row['symbol']}|{row['quantity']}"
+        key = f"cash|{row['exec_time']}|{row['symbol']}|{row['quantity']}"
         return "cash_" + hashlib.sha256(key.encode()).hexdigest()[:28]
 
     df["transaction_id"] = df.apply(make_cash_id, axis=1)
@@ -258,11 +258,11 @@ def upsert_cash_to_supabase(client, records):
 
 def print_cash_table(records, existing_ids):
     print()
-    print(f"  {'#':<4} {'OrderTime':<20} {'Symbol':<12} {'Action':<5} {'Qty':>10} {'Rate':>10} {'NetCash':>10} {'Status'}")
+    print(f"  {'#':<4} {'DateTime':<20} {'Symbol':<12} {'Action':<5} {'Qty':>10} {'Rate':>10} {'NetCash':>10} {'Status'}")
     print("  " + "-" * 90)
     for i, r in enumerate(records, 1):
         status  = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
-        order_t = str(r.get("order_time") or r.get("transaction_date") or "")[:19].replace("T", " ")
+        order_t = str(r.get("exec_time") or r.get("transaction_date") or "")[:19].replace("T", " ")
         qty     = r.get("quantity") or 0
         rate    = r.get("rate") or 0
         net     = r.get("net_cash") or 0
@@ -297,7 +297,7 @@ def transform(executions):
 
     # DateTime: execution timestamp e.g. "05/19/2026,10:20:16"
     exec_dt             = parse_flex_dt(col("DateTime"))
-    df["order_time"]    = exec_dt.dt.strftime("%Y-%m-%dT%H:%M:%S")  # ISO for Supabase
+    df["exec_time"]    = exec_dt.dt.strftime("%Y-%m-%dT%H:%M:%S")   # ISO 8601 for Supabase TIMESTAMPTZ
     df["trade_date"]    = exec_dt.dt.date.astype(str)
 
     df["quantity"]      = pd.to_numeric(col("Quantity"), errors="coerce").abs()
@@ -309,7 +309,7 @@ def transform(executions):
     df.dropna(subset=["symbol", "trade_date", "quantity", "price"], inplace=True)
 
     # Sort by OrderTime — preserves chronological order for repeated same-symbol trades
-    df.sort_values("order_time", inplace=True)
+    df.sort_values("exec_time", inplace=True)
 
     df["trade_id"] = df.apply(make_trade_id, axis=1)
     df.drop(columns=["ibkr_trade_id"], inplace=True)
@@ -351,13 +351,13 @@ def upsert_to_supabase(client, records):
 def print_trade_table(records, existing_ids):
     """Print a formatted table of trades with NEW / DUPLICATE status."""
     print()
-    print(f"  {'#':<4} {'OrderTime':<20} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Comm':>7}  {'Status'}")
+    print(f"  {'#':<4} {'DateTime':<20} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Comm':>7}  {'Status'}")
     print("  " + "-" * 90)
     for i, r in enumerate(records, 1):
         status    = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
         pnl       = r.get("realized_pnl") or 0
         comm      = r.get("commission") or 0
-        order_t   = str(r.get("order_time") or r.get("trade_date") or "")[:19].replace("T", " ")
+        order_t   = str(r.get("exec_time") or r.get("trade_date") or "")[:19].replace("T", " ")
         print(
             f"  {i:<4} {order_t:<20} {r['symbol']:<8} {r['action']:<5} "
             f"{r['quantity']:>7.0f} {r['price']:>9.4f} {pnl:>+10.2f} {comm:>7.2f}  {status}"
