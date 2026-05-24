@@ -7,15 +7,20 @@ on:
   workflow_dispatch:
     inputs:
       days_back:
-        description: "How many days back to scan Gmail (e.g. 7, 30, 90)"
+        description: "How many days back to scan Gmail (e.g. 7, 30, 900)"
         required: false
         default: "5"
+        type: string
+      timeout_minutes:
+        description: "Job timeout in minutes (use 120 for large backfills like 900 days)"
+        required: false
+        default: "30"
         type: string
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes || '30') }}
 
     steps:
       - name: Checkout
