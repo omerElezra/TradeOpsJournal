@@ -132,6 +132,126 @@ def make_trade_id(row):
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
+# ── Cash / FX transactions ─────────────────────────────────────────────────────
+
+def parse_cash_csv(csv_bytes):
+    """
+    Extract CASH asset class EXECUTION rows (currency conversions & FX deposits).
+
+    These rows share the same first-section header as STK trades but have
+    AssetClass == 'CASH'.  Examples: USD.ILS, ILS.USD conversions when
+    depositing or withdrawing local-currency funds.
+    """
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            csv_bytes.seek(0)
+            raw = pd.read_csv(
+                csv_bytes, header=0, dtype=str,
+                on_bad_lines="skip", encoding=encoding,
+            )
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if "LevelOfDetail" not in raw.columns:
+        return pd.DataFrame()
+
+    cash = raw[
+        (raw["LevelOfDetail"].str.strip() == "EXECUTION") &
+        (raw["AssetClass"].str.strip() == "CASH")
+    ].copy()
+
+    return cash
+
+
+def transform_cash(cash_rows):
+    """
+    Map CASH EXECUTION rows → cash_transactions schema.
+
+    Covers:
+      - FX conversions  (Symbol: USD.ILS, ILS.USD, etc.)
+      - Any other cash EXECUTION rows present in the Flex export
+    """
+    if cash_rows.empty:
+        return []
+
+    def col(name):
+        return cash_rows[name].str.strip() if name in cash_rows.columns else pd.Series(
+            [""] * len(cash_rows), index=cash_rows.index
+        )
+
+    df = pd.DataFrame(index=cash_rows.index)
+    df["symbol"]          = col("Symbol")       # e.g. USD.ILS
+    df["description"]     = col("Description")
+    df["ibkr_trade_id"]   = col("TradeID")
+    df["action"]          = col("Buy/Sell")      # BUY / SELL
+    df["currency"]        = col("CurrencyPrimary")
+
+    # Use OrderTime for consistency with stock trades; fall back to DateTime
+    order_dt = parse_flex_dt(col("OrderTime"))
+    exec_dt  = parse_flex_dt(col("DateTime"))
+    ts       = order_dt.combine_first(exec_dt)
+
+    df["transaction_date"] = ts.dt.date.astype(str)
+    df["order_time"]       = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+    df["quantity"]  = pd.to_numeric(col("Quantity"),    errors="coerce").abs()
+    df["rate"]      = pd.to_numeric(col("TradePrice"),  errors="coerce")   # FX rate
+    df["net_cash"]  = pd.to_numeric(col("NetCash"),     errors="coerce")
+    df["commission"]= pd.to_numeric(col("IBCommission"),errors="coerce")
+
+    df.dropna(subset=["symbol", "transaction_date", "quantity"], inplace=True)
+    df.sort_values("order_time", inplace=True)
+
+    # Stable dedup key — prefer IBKR TradeID
+    def make_cash_id(row):
+        if row.get("ibkr_trade_id") and str(row["ibkr_trade_id"]).strip():
+            return f"cash_{row['ibkr_trade_id'].strip()}"
+        key = f"cash|{row['order_time']}|{row['symbol']}|{row['quantity']}"
+        return "cash_" + hashlib.sha256(key.encode()).hexdigest()[:28]
+
+    df["transaction_id"] = df.apply(make_cash_id, axis=1)
+    df.drop(columns=["ibkr_trade_id"], inplace=True)
+
+    return df.to_dict(orient="records")
+
+
+def check_existing_cash_ids(client, ids):
+    if not ids:
+        return set()
+    res = (
+        client.table("cash_transactions")
+        .select("transaction_id")
+        .in_("transaction_id", ids)
+        .execute()
+    )
+    return {row["transaction_id"] for row in res.data}
+
+
+def upsert_cash_to_supabase(client, records):
+    if not records:
+        return 0
+    client.table("cash_transactions").upsert(records, on_conflict="transaction_id").execute()
+    return len(records)
+
+
+def print_cash_table(records, existing_ids):
+    print()
+    print(f"  {'#':<4} {'OrderTime':<20} {'Symbol':<12} {'Action':<5} {'Qty':>10} {'Rate':>10} {'NetCash':>10} {'Status'}")
+    print("  " + "-" * 90)
+    for i, r in enumerate(records, 1):
+        status  = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
+        order_t = (r.get("order_time") or r.get("transaction_date", ""))[:19].replace("T", " ")
+        qty     = r.get("quantity") or 0
+        rate    = r.get("rate") or 0
+        net     = r.get("net_cash") or 0
+        print(
+            f"  {i:<4} {order_t:<20} {r['symbol']:<12} {r.get('action',''):<5} "
+            f"{qty:>10.4f} {rate:>10.6f} {net:>+10.2f}  {status}"
+        )
+    print()
+
+
 def transform(executions):
     """
     Map IBKR Flex Query columns → DB schema.
@@ -188,7 +308,7 @@ def get_supabase_client():
 
 
 def check_existing_trade_ids(client, trade_ids):
-    """Return the set of trade_ids already in the DB."""
+    """Return the set of trade_ids already in the trades table."""
     if not trade_ids:
         return set()
     res = (
@@ -244,8 +364,10 @@ def main():
     print(f"\nFound {len(messages)} email(s) to process.\n")
 
     client = get_supabase_client()
-    total_new = 0
-    total_dupes = 0
+    total_new_trades = 0
+    total_dupe_trades = 0
+    total_new_cash = 0
+    total_dupe_cash = 0
 
     for msg in messages:
         msg_id = msg["id"]
@@ -258,38 +380,61 @@ def main():
         print(f"  File   : {filename}")
         print(f"  Msg ID : {msg_id}")
 
-        raw = parse_ibkr_csv(csv_bytes)
-        records = transform(raw)
+        # ── STK trades ────────────────────────────────────────────────
+        stk_raw  = parse_ibkr_csv(csv_bytes)
+        trades   = transform(stk_raw)
+        print(f"\n  [STK] Parsed {len(trades)} stock EXECUTION row(s)")
 
-        print(f"  Parsed : {len(records)} EXECUTION row(s)")
+        if trades:
+            incoming_ids = [r["trade_id"] for r in trades]
+            existing_ids = check_existing_trade_ids(client, incoming_ids)
+            new_count    = sum(1 for r in trades if r["trade_id"] not in existing_ids)
+            dupe_count   = len(trades) - new_count
 
-        if not records:
-            print("  Nothing to insert for this file.\n")
-            continue
+            print_trade_table(trades, existing_ids)
+            upsert_to_supabase(client, trades)
 
-        # Check which trade_ids already exist — dedup before upsert
-        incoming_ids = [r["trade_id"] for r in records]
-        existing_ids = check_existing_trade_ids(client, incoming_ids)
-        new_count  = sum(1 for r in records if r["trade_id"] not in existing_ids)
-        dupe_count = len(records) - new_count
+            print(f"  ✔ Trades inserted : {new_count}")
+            if dupe_count:
+                print(f"  ↩ Trades skipped  : {dupe_count} duplicate(s)")
 
-        print_trade_table(records, existing_ids)
+            total_new_trades  += new_count
+            total_dupe_trades += dupe_count
+        else:
+            print("  No stock trades in this file.")
 
-        upsert_to_supabase(client, records)
+        # ── CASH / FX transactions ────────────────────────────────────
+        cash_raw   = parse_cash_csv(csv_bytes)
+        cash_recs  = transform_cash(cash_raw)
+        print(f"\n  [CASH] Parsed {len(cash_recs)} cash/FX EXECUTION row(s)")
 
-        print(f"  ✔ Inserted : {new_count} new trade(s)")
-        if dupe_count:
-            print(f"  ↩ Skipped  : {dupe_count} duplicate(s) — already in DB")
+        if cash_recs:
+            incoming_cids = [r["transaction_id"] for r in cash_recs]
+            existing_cids = check_existing_cash_ids(client, incoming_cids)
+            new_c   = sum(1 for r in cash_recs if r["transaction_id"] not in existing_cids)
+            dupe_c  = len(cash_recs) - new_c
+
+            print_cash_table(cash_recs, existing_cids)
+            upsert_cash_to_supabase(client, cash_recs)
+
+            print(f"  ✔ Cash inserted : {new_c}")
+            if dupe_c:
+                print(f"  ↩ Cash skipped  : {dupe_c} duplicate(s)")
+
+            total_new_cash  += new_c
+            total_dupe_cash += dupe_c
+        else:
+            print("  No cash/FX transactions in this file.")
+
         print()
 
-        total_new   += new_count
-        total_dupes += dupe_count
-
     print("=" * 60)
-    print(f"  SUMMARY")
-    print(f"  Files processed : {len(messages)}")
-    print(f"  New trades      : {total_new}")
-    print(f"  Duplicates      : {total_dupes} (safe — upsert, no double-counting)")
+    print("  SUMMARY")
+    print(f"  Files processed       : {len(messages)}")
+    print(f"  New stock trades      : {total_new_trades}")
+    print(f"  Duplicate trades      : {total_dupe_trades}")
+    print(f"  New cash/FX entries   : {total_new_cash}")
+    print(f"  Duplicate cash/FX     : {total_dupe_cash}")
     print("=" * 60)
 
 
