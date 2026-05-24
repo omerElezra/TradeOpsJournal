@@ -40,7 +40,7 @@ def build_gmail_client():
     return build("gmail", "v1", credentials=creds)
 
 
-def find_ibkr_emails(service, days_back=5):
+def find_ibkr_emails(service, days_back=2):
     """Return message IDs of recent IBKR emails with CSV attachments."""
     query = f"from:{IBKR_SENDER} subject:{IBKR_SUBJECT} has:attachment newer_than:{days_back}d"
     result = service.users().messages().list(userId="me", q=query).execute()
@@ -203,12 +203,16 @@ def print_trade_table(records, existing_ids):
 
 
 def main():
+    # DAYS_BACK: set by workflow_dispatch input; empty on scheduled runs → default 2
+    days_back = int(os.environ.get("DAYS_BACK") or 2)
+
     print("=" * 60)
     print("  IBKR Trade Ingestion — TradeOpsJournal")
+    print(f"  Scanning last {days_back} day(s)")
     print("=" * 60)
 
     service = build_gmail_client()
-    messages = find_ibkr_emails(service)
+    messages = find_ibkr_emails(service, days_back=days_back)
 
     if not messages:
         print("\nNo recent IBKR emails found. Nothing to do.")

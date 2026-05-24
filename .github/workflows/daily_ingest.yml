@@ -4,7 +4,13 @@ on:
   schedule:
     # 08:00 UTC Mon–Fri (after IBKR sends overnight Activity Statements)
     - cron: "0 8 * * 1-5"
-  workflow_dispatch: # allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: "How many days back to scan Gmail (e.g. 7, 30, 90)"
+        required: false
+        default: "5"
+        type: string
 
 jobs:
   ingest:
@@ -31,4 +37,7 @@ jobs:
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # On scheduled runs days_back is empty → script defaults to 2
+          # On manual dispatch it uses whatever the user typed
+          DAYS_BACK: ${{ github.event.inputs.days_back }}
         run: python scripts/ingest.py
