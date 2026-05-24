@@ -208,10 +208,10 @@ def transform_cash(cash_rows):
     df["action"]          = col("Buy/Sell")      # BUY / SELL
     df["currency"]        = col("CurrencyPrimary")
 
-    # Use OrderTime for consistency with stock trades; fall back to DateTime
-    order_dt = parse_flex_dt(col("OrderTime"))
+    # Use DateTime as primary timestamp; fall back to OrderTime if missing
     exec_dt  = parse_flex_dt(col("DateTime"))
-    ts       = order_dt.combine_first(exec_dt)
+    order_dt = parse_flex_dt(col("OrderTime"))
+    ts       = exec_dt.combine_first(order_dt)
 
     df["transaction_date"] = ts.dt.date.astype(str)
     df["order_time"]       = ts.dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -295,10 +295,10 @@ def transform(executions):
     df["action"]        = col("Buy/Sell")
     df["currency"]      = col("CurrencyPrimary")
 
-    # OrderTime: when order was placed — use for trade_date + sorting
-    order_dt            = parse_flex_dt(col("OrderTime"))
-    df["order_time"]    = order_dt.dt.strftime("%Y-%m-%dT%H:%M:%S")  # ISO for Supabase
-    df["trade_date"]    = order_dt.dt.date.astype(str)
+    # DateTime: execution timestamp e.g. "05/19/2026,10:20:16"
+    exec_dt             = parse_flex_dt(col("DateTime"))
+    df["order_time"]    = exec_dt.dt.strftime("%Y-%m-%dT%H:%M:%S")  # ISO for Supabase
+    df["trade_date"]    = exec_dt.dt.date.astype(str)
 
     df["quantity"]      = pd.to_numeric(col("Quantity"), errors="coerce").abs()
     df["price"]         = pd.to_numeric(col("TradePrice"), errors="coerce")
