@@ -262,7 +262,7 @@ def print_cash_table(records, existing_ids):
     print("  " + "-" * 90)
     for i, r in enumerate(records, 1):
         status  = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
-        order_t = (r.get("order_time") or r.get("transaction_date", ""))[:19].replace("T", " ")
+        order_t = str(r.get("order_time") or r.get("transaction_date") or "")[:19].replace("T", " ")
         qty     = r.get("quantity") or 0
         rate    = r.get("rate") or 0
         net     = r.get("net_cash") or 0
@@ -357,7 +357,7 @@ def print_trade_table(records, existing_ids):
         status    = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
         pnl       = r.get("realized_pnl") or 0
         comm      = r.get("commission") or 0
-        order_t   = (r.get("order_time") or r.get("trade_date", ""))[:19].replace("T", " ")
+        order_t   = str(r.get("order_time") or r.get("trade_date") or "")[:19].replace("T", " ")
         print(
             f"  {i:<4} {order_t:<20} {r['symbol']:<8} {r['action']:<5} "
             f"{r['quantity']:>7.0f} {r['price']:>9.4f} {pnl:>+10.2f} {comm:>7.2f}  {status}"
