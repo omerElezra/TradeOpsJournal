@@ -155,7 +155,7 @@ def transform(executions):
     return df.to_dict(orient="records")
 
 
-def upsert_to_supabase(records):
+def get_supabase_client():
     url = os.environ["SUPABASE_URL"]
     key = os.environ["SUPABASE_SERVICE_KEY"]
     if not key.startswith("eyJ"):
@@ -163,42 +163,108 @@ def upsert_to_supabase(records):
             "SUPABASE_SERVICE_KEY looks wrong — make sure you copied the "
             "'service_role' key (not the 'anon' key) from Supabase Settings → API."
         )
-    client = create_client(url, key)
+    return create_client(url, key)
+
+
+def check_existing_trade_ids(client, trade_ids):
+    """Return the set of trade_ids already in the DB."""
+    if not trade_ids:
+        return set()
+    res = (
+        client.table("trades")
+        .select("trade_id")
+        .in_("trade_id", trade_ids)
+        .execute()
+    )
+    return {row["trade_id"] for row in res.data}
+
+
+def upsert_to_supabase(client, records):
     if not records:
         return 0
     client.table("trades").upsert(records, on_conflict="trade_id").execute()
     return len(records)
 
 
+def print_trade_table(records, existing_ids):
+    """Print a formatted table of trades with NEW / DUPLICATE status."""
+    print()
+    print(f"  {'#':<4} {'Date':<12} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Commission':>11}  {'Status'}")
+    print("  " + "-" * 82)
+    for i, r in enumerate(records, 1):
+        status = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
+        pnl    = r.get("realized_pnl") or 0
+        comm   = r.get("commission") or 0
+        print(
+            f"  {i:<4} {r['trade_date']:<12} {r['symbol']:<8} {r['action']:<5} "
+            f"{r['quantity']:>7.0f} {r['price']:>9.4f} {pnl:>+10.2f} {comm:>11.2f}  {status}"
+        )
+    print()
+
+
 def main():
-    print("=== IBKR Trade Ingestion ===")
+    print("=" * 60)
+    print("  IBKR Trade Ingestion — TradeOpsJournal")
+    print("=" * 60)
 
     service = build_gmail_client()
     messages = find_ibkr_emails(service)
 
     if not messages:
-        print("No recent IBKR emails with CSV attachments found. Nothing to do.")
+        print("\nNo recent IBKR emails found. Nothing to do.")
+        print("(Searched: last 5 days, from Info@inter-il.com, subject 'Activity Flex')")
         sys.exit(0)
 
-    total_inserted = 0
+    print(f"\nFound {len(messages)} email(s) to process.\n")
+
+    client = get_supabase_client()
+    total_new = 0
+    total_dupes = 0
+
     for msg in messages:
         msg_id = msg["id"]
-        print(f"\nProcessing message {msg_id}...")
         filename, csv_bytes = download_csv_attachment(service, msg_id)
         if csv_bytes is None:
-            print("  No CSV attachment found, skipping.")
+            print(f"[SKIP] Message {msg_id} — no CSV attachment found.")
             continue
 
-        print(f"  Attachment: {filename}")
+        print(f"{'─' * 60}")
+        print(f"  File   : {filename}")
+        print(f"  Msg ID : {msg_id}")
+
         raw = parse_ibkr_csv(csv_bytes)
         records = transform(raw)
-        print(f"  Parsed {len(records)} trade rows.")
 
-        n = upsert_to_supabase(records)
-        total_inserted += n
-        print(f"  Upserted {n} records to Supabase.")
+        print(f"  Parsed : {len(records)} EXECUTION row(s)")
 
-    print(f"\nDone. Total records upserted: {total_inserted}")
+        if not records:
+            print("  Nothing to insert for this file.\n")
+            continue
+
+        # Check which trade_ids already exist — dedup before upsert
+        incoming_ids = [r["trade_id"] for r in records]
+        existing_ids = check_existing_trade_ids(client, incoming_ids)
+        new_count  = sum(1 for r in records if r["trade_id"] not in existing_ids)
+        dupe_count = len(records) - new_count
+
+        print_trade_table(records, existing_ids)
+
+        upsert_to_supabase(client, records)
+
+        print(f"  ✔ Inserted : {new_count} new trade(s)")
+        if dupe_count:
+            print(f"  ↩ Skipped  : {dupe_count} duplicate(s) — already in DB")
+        print()
+
+        total_new   += new_count
+        total_dupes += dupe_count
+
+    print("=" * 60)
+    print(f"  SUMMARY")
+    print(f"  Files processed : {len(messages)}")
+    print(f"  New trades      : {total_new}")
+    print(f"  Duplicates      : {total_dupes} (safe — upsert, no double-counting)")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
