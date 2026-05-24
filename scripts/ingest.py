@@ -41,10 +41,31 @@ def build_gmail_client():
 
 
 def find_ibkr_emails(service, days_back=2):
-    """Return message IDs of recent IBKR emails with CSV attachments."""
+    """
+    Return ALL message IDs matching the IBKR query, paginating through results.
+    Gmail API returns max 500 per page; we follow nextPageToken until exhausted.
+    """
     query = f"from:{IBKR_SENDER} subject:{IBKR_SUBJECT} has:attachment newer_than:{days_back}d"
-    result = service.users().messages().list(userId="me", q=query).execute()
-    return result.get("messages", [])
+    messages = []
+    page_token = None
+    page = 0
+
+    while True:
+        page += 1
+        kwargs = {"userId": "me", "q": query, "maxResults": 500}
+        if page_token:
+            kwargs["pageToken"] = page_token
+
+        result = service.users().messages().list(**kwargs).execute()
+        batch  = result.get("messages", [])
+        messages.extend(batch)
+        print(f"  Gmail page {page}: {len(batch)} message(s) found (total so far: {len(messages)})")
+
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
+
+    return messages
 
 
 def download_csv_attachment(service, message_id):
