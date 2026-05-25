@@ -20,6 +20,26 @@ def get_supabase():
 
 
 @st.cache_data(ttl=300)
+def load_cash(start: str | None, end: str | None) -> pd.DataFrame:
+    client = get_supabase()
+    q = client.table("cash_transactions").select("*").order("exec_time")
+    if start:
+        q = q.gte("transaction_date", start)
+    if end:
+        q = q.lte("transaction_date", end)
+    res = q.execute()
+    if not res.data:
+        return pd.DataFrame()
+    df = pd.DataFrame(res.data)
+    df["exec_time"]        = pd.to_datetime(df["exec_time"], errors="coerce", utc=True).dt.tz_localize(None)
+    df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce").dt.date
+    for col in ["quantity", "rate", "net_cash", "commission"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+@st.cache_data(ttl=300)
 def load_trades(start: str | None, end: str | None) -> pd.DataFrame:
     client = get_supabase()
     q = client.table("trades").select("*").order("exec_time")
@@ -175,6 +195,10 @@ df = load_trades(
     str(start_date) if start_date else None,
     str(end_date)   if end_date   else None,
 )
+df_cash = load_cash(
+    str(start_date) if start_date else None,
+    str(end_date)   if end_date   else None,
+)
 
 # ── Main header ────────────────────────────────────────────────────────────────
 
@@ -190,8 +214,8 @@ closed_trades = [t for t in full_trades if t["status"] == "CLOSED"]
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 
-tab_overview, tab_full, tab_executions = st.tabs([
-    "📊 Overview", "📋 Full Trades", "🔍 All Executions"
+tab_overview, tab_full, tab_executions, tab_cash = st.tabs([
+    "📊 Overview", "📋 Full Trades", "🔍 All Executions", "💵 Transactions"
 ])
 
 # ════════════════════════════════════════════════════════════════════════
@@ -199,8 +223,9 @@ tab_overview, tab_full, tab_executions = st.tabs([
 # ════════════════════════════════════════════════════════════════════════
 with tab_overview:
 
-    total_pnl  = df["realized_pnl"].sum()
-    commission = df["commission"].sum()
+    total_pnl    = df["realized_pnl"].sum()
+    total_comm   = df["commission"].sum()
+    net_pnl      = total_pnl + total_comm          # commission is already negative
     wins  = sum(1 for t in closed_trades if t["pnl"] > 0)
     total = len(closed_trades)
     win_rate  = (wins / total * 100) if total else 0
@@ -210,13 +235,15 @@ with tab_overview:
     worst_day = daily.min() if not daily.empty else 0
     avg_pnl   = sum(t["pnl"] for t in closed_trades) / total if total else 0
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Total P&L",    f"${total_pnl:,.2f}")
-    c2.metric("Win Rate",     f"{win_rate:.1f}%")
-    c3.metric("Closed Trades", total)
-    c4.metric("Avg P&L/Trade", f"${avg_pnl:,.2f}")
-    c5.metric("Best Day",     f"${best_day:,.2f}")
-    c6.metric("Worst Day",    f"${worst_day:,.2f}")
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1.metric("Gross P&L",     f"${total_pnl:,.2f}")
+    c2.metric("Total Commission", f"${total_comm:,.2f}")
+    c3.metric("Net P&L",       f"${net_pnl:,.2f}")
+    c4.metric("Win Rate",      f"{win_rate:.1f}%")
+    c5.metric("Closed Trades", total)
+    c6.metric("Avg P&L/Trade", f"${avg_pnl:,.2f}")
+    c7.metric("Best Day",      f"${best_day:,.2f}")
+    c8.metric("Worst Day",     f"${worst_day:,.2f}")
 
     st.markdown("---")
     col_l, col_r = st.columns(2)
@@ -343,3 +370,91 @@ with tab_executions:
         hide_index=True,
         height=600,
     )
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 4 — TRANSACTIONS (cash_transactions table)
+# ════════════════════════════════════════════════════════════════════════
+with tab_cash:
+
+    if df_cash.empty:
+        st.info("No cash/FX transactions found for the selected date range.")
+    else:
+        # ── Summary metrics ────────────────────────────────────────────
+        total_net     = df_cash["net_cash"].sum()
+        total_comm    = df_cash["commission"].sum()
+        n_rows        = len(df_cash)
+        symbols       = df_cash["symbol"].nunique()
+
+        # Per-symbol breakdown
+        sym_summary = (
+            df_cash.groupby("symbol")
+            .agg(
+                Count       = ("transaction_id", "count"),
+                Total_Qty   = ("quantity", "sum"),
+                Avg_Rate    = ("rate", "mean"),
+                Net_Cash    = ("net_cash", "sum"),
+                Commission  = ("commission", "sum"),
+            )
+            .reset_index()
+            .sort_values("Net_Cash")
+        )
+        sym_summary.columns = ["Symbol", "Count", "Total Qty", "Avg Rate", "Net Cash (USD)", "Commission"]
+
+        st.subheader("Summary")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Transactions",     n_rows)
+        m2.metric("Unique Pairs",     symbols)
+        m3.metric("Total Net Cash",   f"${total_net:,.2f}")
+        m4.metric("Total Commission", f"${total_comm:,.2f}")
+
+        st.markdown("---")
+
+        st.subheader("By Symbol / Currency Pair")
+        st.dataframe(
+            sym_summary,
+            use_container_width=True,
+            column_config={
+                "Avg Rate":         st.column_config.NumberColumn(format="%.6f"),
+                "Net Cash (USD)":   st.column_config.NumberColumn(format="$%.2f"),
+                "Commission":       st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True,
+        )
+
+        # ── Daily net cash chart ───────────────────────────────────────
+        st.subheader("Daily Net Cash Flow")
+        daily_cash = df_cash.groupby("transaction_date")["net_cash"].sum().reset_index()
+        daily_cash.columns = ["Date", "Net Cash"]
+        fig_cash = px.bar(
+            daily_cash, x="Date", y="Net Cash",
+            color="Net Cash",
+            color_continuous_scale=["#e74c3c", "#2ecc71"],
+            color_continuous_midpoint=0,
+        )
+        fig_cash.update_layout(showlegend=False, coloraxis_showscale=False, margin=dict(t=10))
+        st.plotly_chart(fig_cash, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Full detail table ──────────────────────────────────────────
+        st.subheader("Transaction Detail")
+        detail = df_cash[[
+            "exec_time", "symbol", "description", "action",
+            "quantity", "rate", "net_cash", "commission", "currency"
+        ]].copy().sort_values("exec_time", ascending=False)
+        detail["exec_time"] = detail["exec_time"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        detail.columns = ["DateTime", "Symbol", "Description", "Action",
+                          "Qty", "Rate", "Net Cash", "Commission", "Currency"]
+
+        st.dataframe(
+            detail,
+            use_container_width=True,
+            column_config={
+                "Rate":        st.column_config.NumberColumn(format="%.6f"),
+                "Net Cash":    st.column_config.NumberColumn(format="$%.2f"),
+                "Commission":  st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True,
+            height=500,
+        )
+        st.caption(f"{n_rows} transaction(s) · {range_label}")
