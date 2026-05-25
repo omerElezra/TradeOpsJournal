@@ -138,11 +138,30 @@ def parse_ibkr_csv(csv_bytes):
 
 
 FLEX_DT_FORMAT = "%m/%d/%Y,%H:%M:%S"
+# Regex to strip timezone suffix e.g. " EDT", " EST", " UTC" from IBKR timestamps
+import re
+_TZ_SUFFIX = re.compile(r"\s+[A-Z]{2,4}$")
 
 
 def parse_flex_dt(series):
-    """Parse IBKR Flex datetime string '05/19/2026,10:20:16' → datetime."""
-    return pd.to_datetime(series, format=FLEX_DT_FORMAT, errors="coerce")
+    """
+    Parse IBKR Flex datetime string → datetime.
+    Handles both '05/19/2026,10:20:16' and '10/06/2025,09:36:50 EDT'.
+    """
+    cleaned = series.str.strip().str.replace(_TZ_SUFFIX, "", regex=True)
+    return pd.to_datetime(cleaned, format=FLEX_DT_FORMAT, errors="coerce")
+
+
+def sanitize_records(records):
+    """Replace float NaN / inf with None so JSON serialization never fails."""
+    import math
+    clean = []
+    for r in records:
+        clean.append({
+            k: (None if isinstance(v, float) and (math.isnan(v) or math.isinf(v)) else v)
+            for k, v in r.items()
+        })
+    return clean
 
 
 def make_trade_id(row):
@@ -252,7 +271,7 @@ def check_existing_cash_ids(client, ids):
 def upsert_cash_to_supabase(client, records):
     if not records:
         return 0
-    client.table("cash_transactions").upsert(records, on_conflict="transaction_id").execute()
+    client.table("cash_transactions").upsert(sanitize_records(records), on_conflict="transaction_id").execute()
     return len(records)
 
 
@@ -344,7 +363,7 @@ def check_existing_trade_ids(client, trade_ids):
 def upsert_to_supabase(client, records):
     if not records:
         return 0
-    client.table("trades").upsert(records, on_conflict="trade_id").execute()
+    client.table("trades").upsert(sanitize_records(records), on_conflict="trade_id").execute()
     return len(records)
 
 
