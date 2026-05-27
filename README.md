@@ -4,6 +4,19 @@ Automated trading journal for IBKR stock trades.
 
 **Pipeline:** Gmail (IBKR CSV) → GitHub Actions (daily cron) → Supabase → Streamlit UI
 
+## Project documentation
+
+The project now has a full documentation set in [`docs/`](docs/):
+
+| Document | Purpose |
+|---|---|
+| [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | Current system status, implemented functionality, known gaps, and risks. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Current and target architecture for the future web app + AI coach. |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Supabase schema for current and future tables. |
+| [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Product requirements for the journal and future AI trading coach. |
+| [`docs/PRODUCT_PLAN.md`](docs/PRODUCT_PLAN.md) | Milestones, tasks, risks, and traceability. |
+| [`docs/AI_COACHING_VISION.md`](docs/AI_COACHING_VISION.md) | Future AI coach behavior, questions, recommendations, and safety boundaries. |
+
 ---
 
 ## Quick Start
@@ -17,8 +30,9 @@ CREATE TABLE trades (
   id              BIGSERIAL PRIMARY KEY,
   trade_id        TEXT UNIQUE NOT NULL,
   trade_date      DATE NOT NULL,
+  exec_time       TIMESTAMPTZ NOT NULL,
   symbol          TEXT NOT NULL,
-  action          TEXT NOT NULL,
+  action          TEXT NOT NULL CHECK (action IN ('BUY', 'SELL')),
   quantity        NUMERIC NOT NULL,
   price           NUMERIC NOT NULL,
   proceeds        NUMERIC,
@@ -29,8 +43,31 @@ CREATE TABLE trades (
 );
 
 CREATE INDEX idx_trades_date   ON trades(trade_date);
+CREATE INDEX idx_trades_exec_time ON trades(exec_time);
 CREATE INDEX idx_trades_symbol ON trades(symbol);
+
+CREATE TABLE cash_transactions (
+  id                BIGSERIAL PRIMARY KEY,
+  transaction_id    TEXT UNIQUE NOT NULL,
+  transaction_date  DATE NOT NULL,
+  exec_time         TIMESTAMPTZ NOT NULL,
+  symbol            TEXT NOT NULL,
+  description       TEXT,
+  action            TEXT,
+  currency          TEXT,
+  quantity          NUMERIC NOT NULL,
+  rate              NUMERIC,
+  net_cash          NUMERIC,
+  commission        NUMERIC,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_cash_transactions_date ON cash_transactions(transaction_date);
+CREATE INDEX idx_cash_transactions_exec_time ON cash_transactions(exec_time);
+CREATE INDEX idx_cash_transactions_symbol ON cash_transactions(symbol);
 ```
+
+See [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) for details and future tables planned for journaling and AI coaching.
 
 ### 2. Get Gmail OAuth credentials (one-time)
 
