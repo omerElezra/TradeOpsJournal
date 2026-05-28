@@ -261,15 +261,49 @@ with tab_overview:
     worst_day  = daily.min() if not daily.empty else 0
     avg_pnl    = gross_pnl / n_closed if n_closed else 0
 
-    c1,c2,c3,c4,c5,c6,c7,c8 = st.columns(8)
-    c1.metric("Gross P&L",   fmt_usd(gross_pnl))
-    c2.metric("Commission",  fmt_usd(total_comm))
-    c3.metric("Net P&L",     fmt_usd(net_pnl))
-    c4.metric("Win Rate",    f"{win_rate:.1f}%")
-    c5.metric("Trades",      n_closed)
-    c6.metric("Avg / Trade", fmt_usd(avg_pnl))
-    c7.metric("Best Day",    fmt_usd(best_day))
-    c8.metric("Worst Day",   fmt_usd(worst_day))
+    gross_color = "#2ecc71" if gross_pnl >= 0 else "#e74c3c"
+    net_color   = "#2ecc71" if net_pnl   >= 0 else "#e74c3c"
+    best_color  = "#2ecc71" if best_day  >= 0 else "#e74c3c"
+    worst_color = "#2ecc71" if worst_day >= 0 else "#e74c3c"
+    st.markdown(
+        f"""
+        <div style="display:flex;gap:28px;flex-wrap:wrap;padding:8px 0 12px 0;">
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Gross P&amp;L</div>
+            <div style="font-size:15px;font-weight:700;color:{gross_color};">{fmt_usd(gross_pnl)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Commission</div>
+            <div style="font-size:15px;font-weight:700;">{fmt_usd(total_comm)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Net P&amp;L</div>
+            <div style="font-size:15px;font-weight:700;color:{net_color};">{fmt_usd(net_pnl)}</div>
+          </div>
+          <div style="min-width:80px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Win Rate</div>
+            <div style="font-size:15px;font-weight:700;">{win_rate:.1f}%</div>
+          </div>
+          <div style="min-width:60px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Trades</div>
+            <div style="font-size:15px;font-weight:700;">{n_closed}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Avg / Trade</div>
+            <div style="font-size:15px;font-weight:700;">{fmt_usd(avg_pnl)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Best Day</div>
+            <div style="font-size:15px;font-weight:700;color:{best_color};">{fmt_usd(best_day)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Worst Day</div>
+            <div style="font-size:15px;font-weight:700;color:{worst_color};">{fmt_usd(worst_day)}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown("---")
     cl, cr = st.columns(2)
@@ -303,15 +337,85 @@ with tab_full:
     if not full_trades:
         st.info("No trades to display.")
     else:
+        ft1, ft2, ft3 = st.columns([2, 1, 1])
+        symbol_search = ft1.text_input("Search symbol", key="full_symbol_search").strip().upper()
+        status_filter = ft2.multiselect(
+            "Status", ["OPEN", "CLOSED"], default=["OPEN", "CLOSED"], key="full_status_filter"
+        )
+        outcome_filter = ft3.selectbox("Outcome", ["All", "Winners", "Losers", "Flat"], key="full_outcome_filter")
+
+        visible_trades = full_trades
+        if symbol_search:
+            visible_trades = [t for t in visible_trades if symbol_search in str(t["symbol"]).upper()]
+        if status_filter:
+            visible_trades = [t for t in visible_trades if t["status"] in status_filter]
+        if outcome_filter == "Winners":
+            visible_trades = [t for t in visible_trades if t["pnl"] > 0]
+        elif outcome_filter == "Losers":
+            visible_trades = [t for t in visible_trades if t["pnl"] < 0]
+        elif outcome_filter == "Flat":
+            visible_trades = [t for t in visible_trades if t["pnl"] == 0]
+
         st.markdown(
-            f"**{len(full_trades)}** trade(s) · "
+            f"**{len(visible_trades)}** shown · "
+            f"**{len(full_trades)}** total · "
             f"**{len(closed_trades)}** closed · "
             f"**{len(full_trades)-len(closed_trades)}** open"
         )
         st.caption("Click ▶ to expand a trade and see its individual executions.")
         st.markdown("---")
 
-        for trade in reversed(full_trades):
+        if not visible_trades:
+            st.info("No trades match the selected filters.")
+
+        if visible_trades:
+            st.markdown("**Consolidated Trades**")
+            summary_rows = []
+            for trade in reversed(visible_trades):
+                summary_rows.append({
+                    "Symbol": trade["symbol"],
+                    "Status": trade["status"],
+                    "Entry": trade["entry_time"].strftime("%Y-%m-%d %H:%M") if pd.notna(trade["entry_time"]) else None,
+                    "Exit": trade["exit_time"].strftime("%Y-%m-%d %H:%M") if pd.notna(trade["exit_time"]) else None,
+                    "Qty": trade["total_qty"],
+                    "Avg Entry": trade["avg_entry"],
+                    "Avg Exit": trade["avg_exit"],
+                    "Hold": trade["hold_str"],
+                    "P&L": trade["pnl"],
+                    "P&L %": trade["pnl_pct"],
+                    "Comm": trade["commission"],
+                    "Execs": trade["n_exec"],
+                })
+
+            summary_df = pd.DataFrame(summary_rows)
+
+            def color_pnl(value):
+                if pd.isna(value):
+                    return ""
+                if value > 0:
+                    return "color: #2ecc71; font-weight: 700"
+                if value < 0:
+                    return "color: #e74c3c; font-weight: 700"
+                return "color: #aaaaaa; font-weight: 700"
+
+            styled_summary = summary_df.style.format({
+                "Qty": lambda v: fmt_qty(v),
+                "Avg Entry": lambda v: fmt_usd(v),
+                "Avg Exit": lambda v: fmt_usd(v),
+                "P&L": lambda v: fmt_usd(v),
+                "P&L %": lambda v: "—" if pd.isna(v) else f"{v:+.2f}%",
+                "Comm": lambda v: fmt_usd(v),
+            }, na_rep="—").applymap(color_pnl, subset=["P&L"])
+
+            st.dataframe(
+                styled_summary,
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 38 * (len(summary_df) + 1)),
+            )
+            st.markdown("---")
+
+        for trade in reversed(visible_trades):
             pnl     = trade["pnl"]
             pnl_pct = trade["pnl_pct"]
             status  = trade["status"]
@@ -329,14 +433,42 @@ with tab_full:
             )
 
             with st.expander(header, expanded=False):
-                s1,s2,s3,s4,s5,s6,s7 = st.columns(7)
-                s1.metric("Symbol",    trade["symbol"])
-                s2.metric("Qty",       fmt_qty(trade["total_qty"]))
-                s3.metric("Avg Entry", fmt_usd(trade["avg_entry"]))
-                s4.metric("Avg Exit",  fmt_usd(trade["avg_exit"]))
-                s5.metric("Hold",      trade["hold_str"])
-                s6.metric("P&L",       f"{fmt_usd(pnl)}{pct_str}")
-                s7.metric("Comm",      fmt_usd(trade["commission"]))
+                pnl_color = "#2ecc71" if pnl > 0 else ("#e74c3c" if pnl < 0 else "#aaaaaa")
+                st.markdown(
+                    f"""
+                    <div style="display:flex;gap:28px;flex-wrap:wrap;padding:8px 0 12px 0;">
+                      <div style="min-width:60px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Symbol</div>
+                        <div style="font-size:15px;font-weight:700;">{trade['symbol']}</div>
+                      </div>
+                      <div style="min-width:50px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Qty</div>
+                        <div style="font-size:15px;font-weight:700;">{fmt_qty(trade['total_qty'])}</div>
+                      </div>
+                      <div style="min-width:90px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Avg Entry</div>
+                        <div style="font-size:15px;font-weight:700;">{fmt_usd(trade['avg_entry'])}</div>
+                      </div>
+                      <div style="min-width:90px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Avg Exit</div>
+                        <div style="font-size:15px;font-weight:700;">{fmt_usd(trade['avg_exit'])}</div>
+                      </div>
+                      <div style="min-width:80px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Hold</div>
+                        <div style="font-size:15px;font-weight:700;">{trade['hold_str']}</div>
+                      </div>
+                      <div style="min-width:110px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">P&amp;L</div>
+                        <div style="font-size:15px;font-weight:700;color:{pnl_color};">{fmt_usd(pnl)}{pct_str}</div>
+                      </div>
+                      <div style="min-width:80px;">
+                        <div style="font-size:11px;color:#888;margin-bottom:2px;">Comm</div>
+                        <div style="font-size:15px;font-weight:700;">{fmt_usd(trade['commission'])}</div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
                 st.markdown("**Executions**")
                 edf = pd.DataFrame(trade["executions"])[[
@@ -357,14 +489,32 @@ with tab_full:
 # TAB 3 — ALL EXECUTIONS
 # ════════════════════════════════════════════════════════════════════════
 with tab_executions:
-    disp = df[["exec_time","symbol","action","quantity","price",
+    ex1, ex2, ex3 = st.columns([2, 1, 1])
+    exec_symbol_search = ex1.text_input("Search symbol", key="exec_symbol_search").strip().upper()
+    action_options = sorted(df["action"].dropna().unique().tolist())
+    action_filter = ex2.multiselect("Action", action_options, default=action_options, key="exec_action_filter")
+    pnl_filter = ex3.selectbox("P&L", ["All", "Profit", "Loss", "Flat"], key="exec_pnl_filter")
+
+    exec_df = df.copy()
+    if exec_symbol_search:
+        exec_df = exec_df[exec_df["symbol"].str.upper().str.contains(exec_symbol_search, na=False)]
+    if action_filter:
+        exec_df = exec_df[exec_df["action"].isin(action_filter)]
+    if pnl_filter == "Profit":
+        exec_df = exec_df[exec_df["realized_pnl"] > 0]
+    elif pnl_filter == "Loss":
+        exec_df = exec_df[exec_df["realized_pnl"] < 0]
+    elif pnl_filter == "Flat":
+        exec_df = exec_df[exec_df["realized_pnl"] == 0]
+
+    disp = exec_df[["exec_time","symbol","action","quantity","price",
                "proceeds","commission","realized_pnl"]].copy()
     disp = disp.sort_values("exec_time", ascending=False)
     disp["exec_time"] = disp["exec_time"].dt.strftime("%Y-%m-%d %H:%M:%S")
     disp["quantity"]  = disp["quantity"].apply(lambda v: int(v) if v == int(v) else round(v,2))
     disp.columns = ["DateTime","Symbol","Action","Qty","Price","Proceeds","Comm","P&L"]
 
-    st.markdown(f"**{len(df)}** executions · {range_label}")
+    st.markdown(f"**{len(disp)}** shown · **{len(df)}** executions · {range_label}")
     st.dataframe(disp, use_container_width=True, hide_index=True, height=600,
         column_config={
             "Price":    st.column_config.NumberColumn(format="$%.2f"),
@@ -419,7 +569,22 @@ with tab_cash:
 
         # ── Detail table ───────────────────────────────────────────────
         st.subheader("All Transactions")
-        detail = df_cash[[
+        tx1, tx2, tx3 = st.columns([2, 1, 1])
+        pair_search = tx1.text_input("Search pair", key="cash_pair_search").strip().upper()
+        direction_options = sorted(df_cash["action"].dropna().unique().tolist())
+        direction_filter = tx2.multiselect("Direction", direction_options, default=direction_options, key="cash_direction_filter")
+        currency_options = sorted(df_cash["currency"].dropna().unique().tolist())
+        currency_filter = tx3.multiselect("Currency", currency_options, default=currency_options, key="cash_currency_filter")
+
+        cash_view = df_cash.copy()
+        if pair_search:
+            cash_view = cash_view[cash_view["symbol"].str.upper().str.contains(pair_search, na=False)]
+        if direction_filter:
+            cash_view = cash_view[cash_view["action"].isin(direction_filter)]
+        if currency_filter:
+            cash_view = cash_view[cash_view["currency"].isin(currency_filter)]
+
+        detail = cash_view[[
             "exec_time","symbol","action",
             "quantity","rate","usd_amount","ils_amount","commission","currency"
         ]].copy().sort_values("exec_time", ascending=False)
@@ -438,4 +603,4 @@ with tab_cash:
                 "ILS Amount": st.column_config.NumberColumn(format="₪%.2f"),
                 "Comm":       st.column_config.NumberColumn(format="$%.2f"),
             })
-        st.caption(f"{n} transaction(s) · {range_label}")
+        st.caption(f"{len(detail)} shown · {n} transaction(s) · {range_label}")
