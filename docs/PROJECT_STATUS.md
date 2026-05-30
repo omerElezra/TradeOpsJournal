@@ -20,6 +20,8 @@ The current implementation supports:
 | `app/streamlit_app.py` | Streamlit UI and analytics logic. |
 | `scripts/ingest.py` | Gmail → IBKR CSV parsing → Supabase ingestion pipeline. |
 | `scripts/get_gmail_token.py` | One-time local Gmail OAuth refresh-token helper. |
+| `scripts/migrations/001_trade_journal.sql` | DDL migration that creates the `trade_journal` table. |
+| `scripts/run_migration.py` | Helper to apply SQL migrations via the Supabase Management API. |
 | `.github/workflows/daily_ingest.yml` | Daily and manual GitHub Actions ingestion workflow. |
 | `requirements.txt` | Python runtime dependencies. |
 | `.env.example` | Required local environment variable template. |
@@ -62,10 +64,8 @@ The current implementation supports:
 - Shows open and closed trade status.
 - Shows execution-level details for every grouped trade.
 - Shows all executions in a sortable table.
-- Displays all monetary values as `$X.YY` with full precision — no truncation.
-- Formats hold times contextually: months, weeks, days, hours, minutes, or seconds.
-- Shows cash/FX transaction metrics with inferred USD and ILS amounts derived from IBKR quantity and rate fields (IBKR sets `net_cash=0` for FX conversions; values are computed in the UI).
-- Transactions tab shows: total deposited USD, withdrawals, net USD, ILS converted, commission, per-day deposit bar chart, and a full detail table.
+- Shows cash/FX transaction metrics and inferred USD/ILS movement.
+- Displays per-trade journaling controls inside each trade expander: setup selection, psychological tags, and free-text notes persisted to Supabase.
 
 ### Automation
 
@@ -77,10 +77,11 @@ The current implementation supports:
 
 | Area | Limitation |
 |---|---|
+| Database alignment | The documentation now includes the expected schema, but the live Supabase project still needs to be verified or migrated to include `exec_time` and `cash_transactions`. |
 | Authentication | Streamlit currently uses `SUPABASE_SERVICE_KEY`; this is acceptable only in trusted server-side environments and must not be exposed to browsers. |
 | Trade grouping | Trade grouping is position-based per symbol and may not fully support shorts, partial exits, options, multi-leg strategies, or complex scaling behavior. |
-| AI coaching | No AI, note-taking, tagging, question generation, or behavioral feedback loop exists yet. |
-| User input | The current journal is execution-data-only; it does not capture plan, thesis, emotions, screenshots, mistakes, or post-trade reviews. |
+| AI coaching | No AI, question generation, or behavioral feedback loop exists yet. |
+| User input | The journal captures setup, psych tags, and notes per trade. Screenshots, plan thesis, and post-trade reviews are not yet supported. |
 | Testing | No automated tests are currently present. |
 | Packaging | No `pyproject.toml`, app factory, or formal module structure exists yet. |
 
@@ -89,7 +90,7 @@ The current implementation supports:
 1. Update Supabase schema to match the current code.
 2. Add automated tests for parsing, transformation, ID generation, and trade grouping.
 3. Split Streamlit UI, Supabase access, trade analytics, and formatting helpers into modules.
-4. Add manual journal fields before introducing AI, because AI coaching needs user intent and context, not only executions.
+4. Add AI coaching questions once sufficient journal entries are collected to provide meaningful context.
 5. Move toward a secure web architecture where privileged Supabase keys are used only server-side.
 
 ## Current Development Priority

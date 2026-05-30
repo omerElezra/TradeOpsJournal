@@ -62,6 +62,40 @@ def format_duration(td):
     return f"{total}s"
 
 
+# ── Journal options ────────────────────────────────────────────────────────────
+
+SETUP_OPTIONS = [
+    "Breakout",
+    "Pullback / Retest",
+    "VWAP Reclaim",
+    "Gap & Go",
+    "Momentum",
+    "Reversal",
+    "Range / Mean Reversion",
+    "Earnings Play",
+    "News / Catalyst",
+    "Scalp",
+    "Swing",
+    "Other",
+]
+
+PSYCH_TAG_OPTIONS = [
+    "Disciplined",
+    "Patient",
+    "Confident",
+    "Hesitant",
+    "FOMO",
+    "Revenge Trade",
+    "Overtrading",
+    "Impatient Exit",
+    "Moved Stop",
+    "Ignored Plan",
+    "Chased Entry",
+    "Sized Too Big",
+    "Sized Too Small",
+    "Emotional",
+]
+
 # ── Supabase ───────────────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -135,6 +169,35 @@ def load_cash(start, end):
     df["ils_amount"] = df.apply(ils_amount, axis=1)
 
     return df
+
+
+# ── Journal persistence ────────────────────────────────────────────────────────
+
+def load_all_journals():
+    """Load all journal entries into a dict keyed by (symbol, entry_time_str)."""
+    client = get_supabase()
+    res = client.table("trade_journal").select("*").execute()
+    journals = {}
+    for row in (res.data or []):
+        key = (row["symbol"], row["entry_time"])
+        journals[key] = row
+    return journals
+
+
+def save_journal(symbol, entry_time, setup, psych_tags, notes):
+    """Upsert a journal entry for a grouped trade."""
+    client = get_supabase()
+    record = {
+        "symbol": symbol,
+        "entry_time": entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
+        "setup": setup or None,
+        "psych_tags": psych_tags or [],
+        "notes": notes or "",
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    client.table("trade_journal").upsert(
+        record, on_conflict="symbol,entry_time"
+    ).execute()
 
 
 # ── Trade grouping ─────────────────────────────────────────────────────────────
@@ -241,6 +304,12 @@ closed_trades = [t for t in full_trades if t["status"] == "CLOSED"]
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 
+# Pre-load journals so the Full Trades tab can display them
+try:
+    all_journals = load_all_journals()
+except Exception:
+    all_journals = {}  # table may not exist yet — degrade gracefully
+
 tab_overview, tab_full, tab_executions, tab_cash = st.tabs([
     "📊 Overview", "📋 Full Trades", "🔍 All Executions", "💵 Transactions"
 ])
@@ -261,10 +330,25 @@ with tab_overview:
     worst_day  = daily.min() if not daily.empty else 0
     avg_pnl    = gross_pnl / n_closed if n_closed else 0
 
+    # ── Payoff / Avg Win / Avg Loss / Expectancy ───────────────────────
+    win_pnls  = [t["pnl"] for t in closed_trades if t["pnl"] > 0]
+    loss_pnls = [t["pnl"] for t in closed_trades if t["pnl"] < 0]
+    avg_win   = sum(win_pnls) / len(win_pnls)   if win_pnls  else 0
+    avg_loss  = sum(loss_pnls) / len(loss_pnls)  if loss_pnls else 0
+    payoff    = (avg_win / abs(avg_loss)) if avg_loss else 0
+    # Expectancy = (win_rate × avg_win) + (loss_rate × avg_loss)
+    if n_closed:
+        expectancy = (len(win_pnls) / n_closed) * avg_win + (len(loss_pnls) / n_closed) * avg_loss
+    else:
+        expectancy = 0
+
     gross_color = "#2ecc71" if gross_pnl >= 0 else "#e74c3c"
     net_color   = "#2ecc71" if net_pnl   >= 0 else "#e74c3c"
     best_color  = "#2ecc71" if best_day  >= 0 else "#e74c3c"
     worst_color = "#2ecc71" if worst_day >= 0 else "#e74c3c"
+    avg_win_color  = "#2ecc71"
+    avg_loss_color = "#e74c3c"
+    expectancy_color = "#2ecc71" if expectancy >= 0 else "#e74c3c"
     st.markdown(
         f"""
         <div style="display:flex;gap:28px;flex-wrap:wrap;padding:8px 0 12px 0;">
@@ -299,6 +383,22 @@ with tab_overview:
           <div style="min-width:100px;">
             <div style="font-size:11px;color:#888;margin-bottom:2px;">Worst Day</div>
             <div style="font-size:15px;font-weight:700;color:{worst_color};">{fmt_usd(worst_day)}</div>
+          </div>
+          <div style="min-width:90px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Payoff Ratio</div>
+            <div style="font-size:15px;font-weight:700;">{payoff:.2f}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Avg Win</div>
+            <div style="font-size:15px;font-weight:700;color:{avg_win_color};">{fmt_usd(avg_win)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Avg Loss</div>
+            <div style="font-size:15px;font-weight:700;color:{avg_loss_color};">{fmt_usd(avg_loss)}</div>
+          </div>
+          <div style="min-width:100px;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Expectancy</div>
+            <div style="font-size:15px;font-weight:700;color:{expectancy_color};">{fmt_usd(expectancy)}</div>
           </div>
         </div>
         """,
@@ -484,6 +584,63 @@ with tab_full:
                         "Comm":     st.column_config.NumberColumn(format="$%.2f"),
                         "P&L":      st.column_config.NumberColumn(format="$%.2f"),
                     })
+
+                # ── Journal / Notes ────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("**📝 Trade Journal**")
+
+                # Stable key for this trade
+                j_symbol = trade["symbol"]
+                j_entry  = trade["entry_time"]
+                j_entry_str = j_entry.isoformat() if pd.notna(j_entry) else ""
+
+                # Look up existing journal entry
+                existing = all_journals.get((j_symbol, j_entry_str), {})
+
+                # Unique widget keys per trade
+                wk = f"{j_symbol}_{j_entry_str}"
+
+                # Setup selector
+                saved_setup = existing.get("setup") or ""
+                setup_idx = 0  # "(none)" default
+                setup_choices = ["(none)"] + SETUP_OPTIONS
+                if saved_setup in SETUP_OPTIONS:
+                    setup_idx = SETUP_OPTIONS.index(saved_setup) + 1
+                j_setup = st.selectbox(
+                    "Setup", setup_choices, index=setup_idx, key=f"setup_{wk}"
+                )
+                if j_setup == "(none)":
+                    j_setup = ""
+
+                # Psychological tags
+                saved_tags = existing.get("psych_tags") or []
+                j_tags = st.multiselect(
+                    "Psych Tags", PSYCH_TAG_OPTIONS,
+                    default=[t for t in saved_tags if t in PSYCH_TAG_OPTIONS],
+                    key=f"tags_{wk}",
+                )
+
+                # Notes
+                saved_notes = existing.get("notes") or ""
+                j_notes = st.text_area(
+                    "Notes", value=saved_notes, height=100, key=f"notes_{wk}",
+                    placeholder="What was your plan? What went well / wrong?",
+                )
+
+                if st.button("💾 Save Journal", key=f"save_{wk}"):
+                    try:
+                        save_journal(j_symbol, j_entry, j_setup, j_tags, j_notes)
+                        # Update local cache so re-renders show the saved data
+                        all_journals[(j_symbol, j_entry_str)] = {
+                            "symbol": j_symbol,
+                            "entry_time": j_entry_str,
+                            "setup": j_setup,
+                            "psych_tags": j_tags,
+                            "notes": j_notes,
+                        }
+                        st.success("Journal saved.")
+                    except Exception as e:
+                        st.error(f"Save failed: {e}")
 
 # ════════════════════════════════════════════════════════════════════════
 # TAB 3 — ALL EXECUTIONS

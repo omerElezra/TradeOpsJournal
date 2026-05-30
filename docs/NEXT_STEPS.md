@@ -21,7 +21,9 @@ Add a compact closed/open trade table above the expanders with symbol, status, q
 
 ## 3. Journaling UI
 
-Inside each expanded trade, add setup selection, psychological tag controls, and user notes. Persist these fields once the database schema supports them.
+Status: Done.
+
+Inside each expanded trade, add setup selection, psychological tag controls, and user notes. Persisted via `trade_journal` table keyed by `(symbol, entry_time)`. Migration at `scripts/migrations/001_trade_journal.sql`.
 
 ## 4. AI Coach Question
 
