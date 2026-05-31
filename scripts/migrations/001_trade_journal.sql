@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS trade_journal (
   setup       TEXT,
   psych_tags  TEXT[]      DEFAULT '{}',
   notes       TEXT        DEFAULT '',
+  planned_stop   NUMERIC,
+  planned_target NUMERIC,
+  risk_amount    NUMERIC,
   updated_at  TIMESTAMPTZ DEFAULT NOW(),
   created_at  TIMESTAMPTZ DEFAULT NOW(),
 

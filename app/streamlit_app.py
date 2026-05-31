@@ -96,6 +96,70 @@ PSYCH_TAG_OPTIONS = [
     "Emotional",
 ]
 
+SETUP_HELP = {
+    "Breakout":               "פריצת רמה",
+    "Pullback / Retest":      "תיקון / חזרה",
+    "VWAP Reclaim":           "חציית VWAP",
+    "Gap & Go":               "פער + המשך",
+    "Momentum":               "תנועה חזקה",
+    "Reversal":               "היפוך מגמה",
+    "Range / Mean Reversion": "דשדוש / ממוצע",
+    "Earnings Play":          "דוחות חברה",
+    "News / Catalyst":        "חדשות / זרז",
+    "Scalp":                  "עסקה מהירה מאוד",
+    "Swing":                  "החזקה מספר ימים",
+    "Other":                  "אחר",
+}
+
+PSYCH_TAG_HELP = {
+    "Disciplined":     "עמדתי בתוכנית",
+    "Patient":         "המתנתי לטריגר",
+    "Confident":       "כניסה רגועה",
+    "Hesitant":        "היססתי",
+    "FOMO":            "פחד מפספוס",
+    "Revenge Trade":   "עסקת נקמה",
+    "Overtrading":     "מסחר יתר",
+    "Impatient Exit":  "יציאה מוקדמת",
+    "Moved Stop":      "הזזת סטופ",
+    "Ignored Plan":    "התעלמתי מהתוכנית",
+    "Chased Entry":    "מרדף / גבוה מדי",
+    "Sized Too Big":   "כמות גדולה מדי",
+    "Sized Too Small": "כמות קטנה מדי",
+    "Emotional":       "החלטה רגשית",
+}
+
+SETUP_HELP_FULL = {
+    "Breakout":               "כניסה בעת פריצת רמת התנגדות או תמיכה משמעותית עם נפח גבוה",
+    "Pullback / Retest":      "כניסה בנסיגת מחיר חזרה לרמה שנפרצה לפני שממשיכה בכיוון הפריצה",
+    "VWAP Reclaim":           "כניסה כשהמחיר חוצר ומחזיק מחדש מעל (או מתחת) ל-VWAP לאחר שאיבד אותה",
+    "Gap & Go":               "מניה שפתחה בפער מחירים (Gap) וממשיכה חזק באותו הכיוון בתחילת המסחר",
+    "Momentum":               "הצטרפות לתנועת מחיר חזקה ומהירה ללא המתנה לתיקון – הכוח הוא הסיגנל",
+    "Reversal":               "עסקה נגד כיוון המגמה הנוכחית בעת זיהוי סימני חולשה, דחייה, או מבנה היפוך",
+    "Range / Mean Reversion": "מסחר בגבולות טווח מוגדר, או הימור על חזרה למחיר ממוצע לאחר תנועה קיצונית",
+    "Earnings Play":          "עסקה לפני / אחרי פרסום דוחות כספיים של חברה – מנצל תנועה צפויה מהאירוע",
+    "News / Catalyst":        "מסחר בעקבות הודעה חדשותית, הכרזה, שינוי רגולטורי, או אירוע פונדמנטלי משפיע",
+    "Scalp":                  "עסקה מהירה מאוד – שניות עד דקות בודדות – ללכידת רווח קטן עם ניהול סיכון הדוק",
+    "Swing":                  "עסקה מתוכננת להחזקה של מספר ימים עד שבועות תוך מרווח ריוח/הפסד רחב יותר",
+    "Other":                  "תבנית מסחר אישית אחרת שאינה מופיעה ברשימה",
+}
+
+PSYCH_TAG_HELP_FULL = {
+    "Disciplined":     "עמדתי במלואם בחוקי הכניסה, היציאה, גודל הפוזיציה וניהול הסיכונים",
+    "Patient":         "המתנתי לטריגר המדויק ולא נכנסתי לפניו מחוסר אורך רוח",
+    "Confident":       "ניהלתי את העסקה ברוגע ובביטחון מלא – ללא פחד מיותר",
+    "Hesitant":        "היססתי בעת הביצוע ועיכוב זה הוביל לכניסה או יציאה במחיר פחות טוב",
+    "FOMO":            "נכנסתי חפוזה כי המניה כבר רצה – פחד מפספוס הוביל לכניסה ללא תבנית ברורה",
+    "Revenge Trade":   "נכנסתי לעסקה מהירה אחרי הפסד כדי 'להחזיר' – ללא תוכנית ובניגוד לחוקים",
+    "Overtrading":     "ביצעתי יותר מדי עסקאות במהלך היום ללא תבניות חוקיות ברורות לכל אחת מהן",
+    "Impatient Exit":  "סגרתי את העסקה מוקדם מדי מחוסר סבלנות – לפני שהגיעה לחוקי היציאה",
+    "Moved Stop":      "הרחקתי את הסטופ-לוס מרמתו המקורית בניגוד לתוכנית – הגדלתי את הסיכון",
+    "Ignored Plan":    "סחרתי 'מהבטן' בהתעלמות מוחלטת מהתוכנית שנקבעה לפני הכניסה לעסקה",
+    "Chased Entry":    "קניתי גבוה בהרבה מטריגר הכניסה המקורי בגלל ריצה מהירה – הסיכון/סיכוי נפגע",
+    "Sized Too Big":   "עבדתי בסיכון כספי גבוה מדי ביחס לחוקי ניהול הסיכונים שלי",
+    "Sized Too Small": "כניסה בכמות זניחה שמקטינה את משמעות העסקה גם אם היתה נכונה",
+    "Emotional":       "קבלת החלטות מתוך פחד, כעס, תאוות בצע או תקווה – לא על בסיס ניתוח",
+}
+
 # ── Supabase ───────────────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -184,7 +248,8 @@ def load_all_journals():
     return journals
 
 
-def save_journal(symbol, entry_time, setup, psych_tags, notes):
+def save_journal(symbol, entry_time, setup, psych_tags, notes,
+                 planned_stop=None, planned_target=None, risk_amount=None):
     """Upsert a journal entry for a grouped trade."""
     client = get_supabase()
     record = {
@@ -193,6 +258,9 @@ def save_journal(symbol, entry_time, setup, psych_tags, notes):
         "setup": setup or None,
         "psych_tags": psych_tags or [],
         "notes": notes or "",
+        "planned_stop": planned_stop,
+        "planned_target": planned_target,
+        "risk_amount": risk_amount,
         "updated_at": datetime.utcnow().isoformat(),
     }
     client.table("trade_journal").upsert(
@@ -220,8 +288,13 @@ def build_trade_summary(execs, open_trade=False):
 
     pnl        = df["realized_pnl"].sum()
     commission = df["commission"].sum()
+    net_pnl    = pnl + commission
     cost_basis = (buys["price"] * buys["quantity"]).sum() if buy_qty else None
-    pnl_pct    = (pnl / cost_basis * 100) if cost_basis else None
+    # For open trades only show P&L % when there are realized exits
+    if open_trade:
+        pnl_pct = None
+    else:
+        pnl_pct = (pnl / cost_basis * 100) if cost_basis else None
 
     return {
         "symbol":       df["symbol"].iloc[0],
@@ -234,6 +307,7 @@ def build_trade_summary(execs, open_trade=False):
         "avg_entry":    round(avg_entry, 4) if avg_entry else None,
         "avg_exit":     round(avg_exit,  4) if avg_exit  else None,
         "pnl":          round(pnl, 2),
+        "net_pnl":      round(net_pnl, 2),
         "pnl_pct":      round(pnl_pct, 2) if pnl_pct else None,
         "commission":   round(commission, 2),
         "executions":   execs,
@@ -472,9 +546,30 @@ with tab_full:
             st.markdown("**Consolidated Trades**")
             summary_rows = []
             for trade in reversed(visible_trades):
+                j_key = (trade["symbol"],
+                         trade["entry_time"].isoformat() if pd.notna(trade["entry_time"]) else "")
+                journal = all_journals.get(j_key, {})
+                setup = journal.get("setup") or ""
+                tags  = journal.get("psych_tags") or []
+                has_journal = bool(setup or tags or (journal.get("notes") or "").strip())
+
+                # R-multiple: actual P&L / planned risk
+                planned_stop = journal.get("planned_stop")
+                risk_amount  = journal.get("risk_amount")
+                r_multiple   = None
+                if risk_amount and risk_amount != 0:
+                    r_multiple = round(trade["net_pnl"] / risk_amount, 2)
+                elif planned_stop and trade["avg_entry"]:
+                    planned_risk = abs(trade["avg_entry"] - planned_stop) * trade["total_qty"]
+                    if planned_risk > 0:
+                        r_multiple = round(trade["net_pnl"] / planned_risk, 2)
+
                 summary_rows.append({
+                    "📝": "✏️" if has_journal else "—",
                     "Symbol": trade["symbol"],
                     "Status": trade["status"],
+                    "Setup": setup or "—",
+                    "Tags": ", ".join(tags) if tags else "—",
                     "Entry": trade["entry_time"].strftime("%Y-%m-%d %H:%M") if pd.notna(trade["entry_time"]) else None,
                     "Exit": trade["exit_time"].strftime("%Y-%m-%d %H:%M") if pd.notna(trade["exit_time"]) else None,
                     "Qty": trade["total_qty"],
@@ -482,7 +577,9 @@ with tab_full:
                     "Avg Exit": trade["avg_exit"],
                     "Hold": trade["hold_str"],
                     "P&L": trade["pnl"],
+                    "Net P&L": trade["net_pnl"],
                     "P&L %": trade["pnl_pct"],
+                    "R": r_multiple,
                     "Comm": trade["commission"],
                     "Execs": trade["n_exec"],
                 })
@@ -503,9 +600,11 @@ with tab_full:
                 "Avg Entry": lambda v: fmt_usd(v),
                 "Avg Exit": lambda v: fmt_usd(v),
                 "P&L": lambda v: fmt_usd(v),
+                "Net P&L": lambda v: fmt_usd(v),
                 "P&L %": lambda v: "—" if pd.isna(v) else f"{v:+.2f}%",
+                "R": lambda v: "—" if pd.isna(v) else f"{v:+.2f}R",
                 "Comm": lambda v: fmt_usd(v),
-            }, na_rep="—").applymap(color_pnl, subset=["P&L"])
+            }, na_rep="—").applymap(color_pnl, subset=["P&L", "Net P&L", "P&L %", "R"])
 
             st.dataframe(
                 styled_summary,
@@ -606,19 +705,58 @@ with tab_full:
                 setup_choices = ["(none)"] + SETUP_OPTIONS
                 if saved_setup in SETUP_OPTIONS:
                     setup_idx = SETUP_OPTIONS.index(saved_setup) + 1
-                j_setup = st.selectbox(
-                    "Setup", setup_choices, index=setup_idx, key=f"setup_{wk}"
-                )
-                if j_setup == "(none)":
-                    j_setup = ""
+
+                _sc1, _sc2 = st.columns([9, 1])
+                with _sc1:
+                    j_setup = st.selectbox(
+                        "Setup", setup_choices, index=setup_idx, key=f"setup_{wk}",
+                        format_func=lambda x: x if x == "(none)" else f"{x}  –  {SETUP_HELP.get(x, '')}"
+                    )
+                    if j_setup == "(none)":
+                        j_setup = ""
+                with _sc2:
+                    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+                    with st.popover("ℹ️"):
+                        st.markdown(
+                            "<p dir='rtl' style='font-size:15px;font-weight:700;margin-bottom:8px'>📐 מדריך תבניות כניסה</p>",
+                            unsafe_allow_html=True,
+                        )
+                        rows = "".join(
+                            f"<tr><td style='font-weight:600;white-space:nowrap;padding:3px 10px 3px 0'>{k}</td>"
+                            f"<td dir='rtl' style='font-size:12px;color:#ccc'>{v}</td></tr>"
+                            for k, v in SETUP_HELP_FULL.items()
+                        )
+                        st.markdown(
+                            f"<table style='border-collapse:collapse;width:100%'>{rows}</table>",
+                            unsafe_allow_html=True,
+                        )
 
                 # Psychological tags
                 saved_tags = existing.get("psych_tags") or []
-                j_tags = st.multiselect(
-                    "Psych Tags", PSYCH_TAG_OPTIONS,
-                    default=[t for t in saved_tags if t in PSYCH_TAG_OPTIONS],
-                    key=f"tags_{wk}",
-                )
+                _tc1, _tc2 = st.columns([9, 1])
+                with _tc1:
+                    j_tags = st.multiselect(
+                        "Psych Tags", PSYCH_TAG_OPTIONS,
+                        default=[t for t in saved_tags if t in PSYCH_TAG_OPTIONS],
+                        key=f"tags_{wk}",
+                        format_func=lambda x: f"{x}  –  {PSYCH_TAG_HELP.get(x, '')}"
+                    )
+                with _tc2:
+                    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+                    with st.popover("ℹ️"):
+                        st.markdown(
+                            "<p dir='rtl' style='font-size:15px;font-weight:700;margin-bottom:8px'>🧠 מדריך תגיות פסיכולוגיות</p>",
+                            unsafe_allow_html=True,
+                        )
+                        rows = "".join(
+                            f"<tr><td style='font-weight:600;white-space:nowrap;padding:3px 10px 3px 0'>{k}</td>"
+                            f"<td dir='rtl' style='font-size:12px;color:#ccc'>{v}</td></tr>"
+                            for k, v in PSYCH_TAG_HELP_FULL.items()
+                        )
+                        st.markdown(
+                            f"<table style='border-collapse:collapse;width:100%'>{rows}</table>",
+                            unsafe_allow_html=True,
+                        )
 
                 # Notes
                 saved_notes = existing.get("notes") or ""
@@ -627,9 +765,37 @@ with tab_full:
                     placeholder="What was your plan? What went well / wrong?",
                 )
 
+                # Risk / Reward fields
+                st.markdown("**📐 Risk / Reward**")
+                rr1, rr2, rr3 = st.columns(3)
+                saved_stop   = existing.get("planned_stop")
+                saved_target = existing.get("planned_target")
+                saved_risk   = existing.get("risk_amount")
+
+                j_stop = rr1.number_input(
+                    "Planned Stop ($)", value=float(saved_stop) if saved_stop else None,
+                    min_value=0.0, step=0.01, format="%.2f", key=f"stop_{wk}",
+                    help="Your invalidation / stop-loss price",
+                )
+                j_target = rr2.number_input(
+                    "Planned Target ($)", value=float(saved_target) if saved_target else None,
+                    min_value=0.0, step=0.01, format="%.2f", key=f"target_{wk}",
+                    help="Your profit target price",
+                )
+                j_risk = rr3.number_input(
+                    "Risk Amount ($)", value=float(saved_risk) if saved_risk else None,
+                    min_value=0.0, step=0.01, format="%.2f", key=f"risk_{wk}",
+                    help="Total dollar risk (overrides stop × qty calculation)",
+                )
+
                 if st.button("💾 Save Journal", key=f"save_{wk}"):
                     try:
-                        save_journal(j_symbol, j_entry, j_setup, j_tags, j_notes)
+                        save_journal(
+                            j_symbol, j_entry, j_setup, j_tags, j_notes,
+                            planned_stop=j_stop if j_stop else None,
+                            planned_target=j_target if j_target else None,
+                            risk_amount=j_risk if j_risk else None,
+                        )
                         # Update local cache so re-renders show the saved data
                         all_journals[(j_symbol, j_entry_str)] = {
                             "symbol": j_symbol,
@@ -637,6 +803,9 @@ with tab_full:
                             "setup": j_setup,
                             "psych_tags": j_tags,
                             "notes": j_notes,
+                            "planned_stop": j_stop if j_stop else None,
+                            "planned_target": j_target if j_target else None,
+                            "risk_amount": j_risk if j_risk else None,
                         }
                         st.success("Journal saved.")
                     except Exception as e:
