@@ -9,12 +9,16 @@ import {
   NotebookPen,
   Sparkles,
   Settings,
+  Receipt,
+  Banknote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: CandlestickChart },
+  { href: "/transactions", label: "Transactions", icon: Receipt },
+  { href: "/cash", label: "Cash", icon: Banknote },
   { href: "/analytics", label: "Analytics", icon: LineChart },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/insights", label: "AI Insights", icon: Sparkles },

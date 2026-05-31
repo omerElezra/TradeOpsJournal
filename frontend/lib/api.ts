@@ -1,10 +1,14 @@
 import type {
+  CashQuery,
+  CashTransaction,
   EquityPoint,
+  ExecutionQuery,
   Insight,
   JournalEntry,
   MetricsSummary,
   Paginated,
   Range,
+  RawExecutionRow,
   TradeGroup,
   TradeGroupDetail,
   TradeQuery,
@@ -58,4 +62,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  getExecutions: (params: ExecutionQuery) =>
+    request<Paginated<RawExecutionRow>>(`/api/v1/executions${qs({ ...params })}`),
+
+  getCash: (params: CashQuery) =>
+    request<Paginated<CashTransaction>>(`/api/v1/cash${qs({ ...params })}`),
 };

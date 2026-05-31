@@ -130,3 +130,48 @@ export interface TradeQuery {
   side?: Side;
   result?: TradeResult;
 }
+
+export interface RawExecutionRow {
+  tradeId: string;
+  execTime: string;
+  symbol: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  proceeds: number | null;
+  commission: number | null;
+  realizedPnl: number | null;
+  currency: string;
+}
+
+export interface CashTransaction {
+  transactionId: string;
+  execTime: string;
+  symbol: string;
+  description: string | null;
+  action: string | null;
+  currency: string | null;
+  quantity: number;
+  rate: number | null;
+  netCash: number | null;
+  commission: number | null;
+}
+
+export interface ExecutionQuery {
+  range?: Range;
+  cursor?: string | null;
+  limit?: number;
+  sort?: string;
+  dir?: "asc" | "desc";
+  symbol?: string;
+  action?: string;
+}
+
+export interface CashQuery {
+  range?: Range;
+  cursor?: string | null;
+  limit?: number;
+  sort?: string;
+  dir?: "asc" | "desc";
+  symbol?: string;
+}

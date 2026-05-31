@@ -34,6 +34,7 @@ export function pnlIntent(value: number): "positive" | "negative" | "neutral" {
 export function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-US", {
+    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -44,7 +45,22 @@ export function formatDateTime(iso: string | null): string {
 export function formatDuration(minutes: number | null): string {
   if (minutes == null) return "—";
   if (minutes < 60) return `${minutes}m`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
+
+  const totalHours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+
+  if (totalHours < 24) {
+    return mins ? `${totalHours}h ${mins}m` : `${totalHours}h`;
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+
+  if (days < 30) {
+    return hours ? `${days}d ${hours}h` : `${days}d`;
+  }
+
+  const months = Math.floor(days / 30);
+  const remDays = days % 30;
+  return remDays ? `${months}mo ${remDays}d` : `${months}mo`;
 }

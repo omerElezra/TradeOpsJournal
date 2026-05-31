@@ -159,6 +159,38 @@ class Insight(CamelModel):
 
 
 # ---------------------------------------------------------------------------
+# Raw executions (trades table — individual fills)
+# ---------------------------------------------------------------------------
+class RawExecutionRow(CamelModel):
+    trade_id: str
+    exec_time: datetime
+    symbol: str
+    action: Literal["BUY", "SELL"]
+    quantity: float
+    price: float
+    proceeds: Optional[float] = None
+    commission: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    currency: str = "USD"
+
+
+# ---------------------------------------------------------------------------
+# Cash transactions table
+# ---------------------------------------------------------------------------
+class CashTransactionRow(CamelModel):
+    transaction_id: str
+    exec_time: datetime
+    symbol: str
+    description: Optional[str] = None
+    action: Optional[str] = None
+    currency: Optional[str] = None
+    quantity: float
+    rate: Optional[float] = None
+    net_cash: Optional[float] = None
+    commission: Optional[float] = None
+
+
+# ---------------------------------------------------------------------------
 # Pagination
 # ---------------------------------------------------------------------------
 class Paginated(CamelModel, Generic[T]):

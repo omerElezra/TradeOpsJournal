@@ -138,6 +138,7 @@ def parse_ibkr_csv(csv_bytes):
 
 
 FLEX_DT_FORMAT = "%m/%d/%Y,%H:%M:%S"
+FLEX_DT_FORMAT_DAYFIRST = "%d/%m/%Y,%H:%M:%S"
 # Regex to strip timezone suffix e.g. " EDT", " EST", " UTC" from IBKR timestamps
 import re
 _TZ_SUFFIX = re.compile(r"\s+[A-Z]{2,4}$")
@@ -146,10 +147,35 @@ _TZ_SUFFIX = re.compile(r"\s+[A-Z]{2,4}$")
 def parse_flex_dt(series):
     """
     Parse IBKR Flex datetime string → datetime.
-    Handles both '05/19/2026,10:20:16' and '10/06/2025,09:36:50 EDT'.
+
+    IBKR exports use two date formats depending on account locale:
+      - DD/MM/YYYY,HH:MM:SS TZ   (with timezone suffix like EDT/EST → day-first)
+      - MM/DD/YYYY,HH:MM:SS      (US format, no timezone suffix → month-first)
+
+    We detect per-value: if a timezone suffix is present the date portion
+    is day-first; otherwise it is month-first.
     """
-    cleaned = series.str.strip().str.replace(_TZ_SUFFIX, "", regex=True)
-    return pd.to_datetime(cleaned, format=FLEX_DT_FORMAT, errors="coerce")
+    cleaned = series.str.strip()
+    has_tz = cleaned.str.contains(_TZ_SUFFIX, na=False)
+
+    # Strip timezone suffix from all values
+    stripped = cleaned.str.replace(_TZ_SUFFIX, "", regex=True)
+
+    result = pd.Series(pd.NaT, index=series.index)
+
+    # DD/MM/YYYY for entries WITH timezone suffix (e.g. "02/10/2025,15:36:33 EDT")
+    if has_tz.any():
+        result[has_tz] = pd.to_datetime(
+            stripped[has_tz], format=FLEX_DT_FORMAT_DAYFIRST, errors="coerce"
+        )
+
+    # MM/DD/YYYY for entries WITHOUT timezone suffix (e.g. "11/26/2025,11:53:35")
+    if (~has_tz).any():
+        result[~has_tz] = pd.to_datetime(
+            stripped[~has_tz], format=FLEX_DT_FORMAT, errors="coerce"
+        )
+
+    return result
 
 
 def sanitize_records(records):

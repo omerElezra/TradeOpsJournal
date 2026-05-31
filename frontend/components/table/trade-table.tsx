@@ -4,7 +4,6 @@ import * as React from "react";
 import {
   flexRender,
   getCoreRowModel,
-  getSortedRowModel,
   useReactTable,
   type SortingState,
 } from "@tanstack/react-table";
@@ -29,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { tradeColumns } from "@/components/table/columns";
 import { useTrades } from "@/hooks/use-trades";
 import { useRange } from "@/components/range-context";
-import type { TradeResult, Side } from "@/types";
+import type { TradeResult, TradeGroup } from "@/types";
 
 const RESULTS: (TradeResult | "ALL")[] = ["ALL", "WIN", "LOSS", "BREAKEVEN"];
 
@@ -49,22 +48,53 @@ export function TradeTable({
   const [result, setResult] = React.useState<TradeResult | "ALL">("ALL");
   const [cursor, setCursor] = React.useState<string | null>(null);
 
+  // Accumulated rows for load-more (full variant)
+  const [allTrades, setAllTrades] = React.useState<TradeGroup[]>([]);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [total, setTotal] = React.useState(0);
+  const isLoadMore = React.useRef(false);
+
+  const sortKey = sorting[0]?.id ?? "entryTime";
+  const sortDir: "asc" | "desc" = sorting[0]?.desc === false ? "asc" : "desc";
+
   const { data, isLoading, isFetching } = useTrades({
     range,
     limit: variant === "compact" ? 8 : pageSize,
     symbol: symbol || undefined,
     result: result === "ALL" ? undefined : result,
-    cursor,
+    sort: sortKey,
+    dir: sortDir,
+    cursor: cursor || undefined,
   });
 
+  // Merge fetched page into accumulated list
+  React.useEffect(() => {
+    if (!data || variant !== "full") return;
+    if (isLoadMore.current) {
+      setAllTrades((prev) => [...prev, ...data.data]);
+    } else {
+      setAllTrades(data.data);
+    }
+    isLoadMore.current = false;
+    setNextCursor(data.nextCursor);
+    setTotal(data.total);
+  }, [data, variant]);
+
+  const displayData = variant === "full" ? allTrades : (data?.data ?? []);
+
   const table = useReactTable({
-    data: data?.data ?? [],
+    data: displayData,
     columns: tradeColumns,
     state: { sorting },
-    onSortingChange: setSorting,
+    onSortingChange: (updater) => {
+      // Reset to first page whenever sort changes
+      isLoadMore.current = false;
+      setCursor(null);
+      setSorting(updater);
+    },
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    manualPagination: true,
+    // Server handles sorting — no getSortedRowModel needed
+    manualSorting: true,
   });
 
   return (
@@ -78,8 +108,9 @@ export function TradeTable({
               <input
                 value={symbol}
                 onChange={(e) => {
-                  setSymbol(e.target.value.toUpperCase());
+                  isLoadMore.current = false;
                   setCursor(null);
+                  setSymbol(e.target.value.toUpperCase());
                 }}
                 placeholder="Symbol"
                 className="h-8 w-32 rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-1 focus:ring-ring"
@@ -90,8 +121,9 @@ export function TradeTable({
                 <button
                   key={r}
                   onClick={() => {
-                    setResult(r);
+                    isLoadMore.current = false;
                     setCursor(null);
+                    setResult(r);
                   }}
                   className={`rounded px-2 py-1 text-xs ${
                     result === r
@@ -166,29 +198,27 @@ export function TradeTable({
         {variant === "full" && (
           <div className="flex items-center justify-between pt-4">
             <span className="text-xs text-muted-foreground">
-              {data ? `${data.total} trades` : ""}
+              {total > 0
+                ? `${allTrades.length} of ${total} trades`
+                : ""}
             </span>
-            <div className="flex gap-2">
+            {nextCursor && (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!cursor}
-                onClick={() => setCursor(null)}
+                disabled={isFetching}
+                onClick={() => {
+                  isLoadMore.current = true;
+                  setCursor(nextCursor);
+                }}
               >
-                First
+                {isFetching ? "Loading…" : "Load more"}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!data?.nextCursor || isFetching}
-                onClick={() => setCursor(data?.nextCursor ?? null)}
-              >
-                Next
-              </Button>
-            </div>
+            )}
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
+

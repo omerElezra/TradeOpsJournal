@@ -96,3 +96,107 @@ def _parse(v: str) -> datetime:
 
 def _norm_iso(v: str) -> str:
     return _parse(v).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Raw executions page (trades table)
+# ---------------------------------------------------------------------------
+_EXEC_SORT_COLS = {"execTime", "symbol", "action", "quantity", "price", "proceeds", "commission", "realizedPnl"}
+_EXEC_COL_MAP = {
+    "execTime": "exec_time",
+    "symbol": "symbol",
+    "action": "action",
+    "quantity": "quantity",
+    "price": "price",
+    "proceeds": "proceeds",
+    "commission": "commission",
+    "realizedPnl": "realized_pnl",
+}
+
+
+def fetch_executions_page(
+    start: datetime,
+    end: datetime,
+    offset: int = 0,
+    limit: int = 50,
+    sort: str = "execTime",
+    dir: str = "desc",
+    symbol: Optional[str] = None,
+    action: Optional[str] = None,
+) -> tuple[list[dict], int]:
+    client = get_supabase()
+    if client is None:
+        return [], 0
+
+    col = _EXEC_COL_MAP.get(sort, "exec_time")
+    desc = dir.lower() == "desc"
+
+    q = (
+        client.table("trades")
+        .select(
+            "trade_id, exec_time, symbol, action, quantity, price, "
+            "proceeds, commission, realized_pnl, currency",
+            count="exact",
+        )
+        .gte("exec_time", start.isoformat())
+        .lte("exec_time", end.isoformat())
+        .order(col, desc=desc)
+        .range(offset, offset + limit - 1)
+    )
+    if symbol:
+        q = q.eq("symbol", symbol.upper())
+    if action:
+        q = q.eq("action", action.upper())
+
+    resp = q.execute()
+    total = resp.count or 0
+    return resp.data or [], total
+
+
+# ---------------------------------------------------------------------------
+# Cash transactions page
+# ---------------------------------------------------------------------------
+_CASH_COL_MAP = {
+    "execTime": "exec_time",
+    "symbol": "symbol",
+    "quantity": "quantity",
+    "netCash": "net_cash",
+    "commission": "commission",
+    "rate": "rate",
+}
+
+
+def fetch_cash_page(
+    start: datetime,
+    end: datetime,
+    offset: int = 0,
+    limit: int = 50,
+    sort: str = "execTime",
+    dir: str = "desc",
+    symbol: Optional[str] = None,
+) -> tuple[list[dict], int]:
+    client = get_supabase()
+    if client is None:
+        return [], 0
+
+    col = _CASH_COL_MAP.get(sort, "exec_time")
+    desc = dir.lower() == "desc"
+
+    q = (
+        client.table("cash_transactions")
+        .select(
+            "transaction_id, exec_time, symbol, description, action, "
+            "currency, quantity, rate, net_cash, commission",
+            count="exact",
+        )
+        .gte("exec_time", start.isoformat())
+        .lte("exec_time", end.isoformat())
+        .order(col, desc=desc)
+        .range(offset, offset + limit - 1)
+    )
+    if symbol:
+        q = q.ilike("symbol", f"%{symbol}%")
+
+    resp = q.execute()
+    total = resp.count or 0
+    return resp.data or [], total

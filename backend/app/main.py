@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import insights, journal, metrics, trades
+from app.routers import cash, executions, insights, journal, metrics, trades
 
 settings = get_settings()
 
@@ -21,6 +21,8 @@ app.add_middleware(
 
 app.include_router(metrics.router)
 app.include_router(trades.router)
+app.include_router(executions.router)
+app.include_router(cash.router)
 app.include_router(journal.router)
 app.include_router(insights.router)
 

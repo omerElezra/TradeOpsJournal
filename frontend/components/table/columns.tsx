@@ -36,12 +36,12 @@ export const tradeColumns: ColumnDef<TradeGroup>[] = [
   },
   {
     accessorKey: "side",
-    header: "Side",
+    header: sortHeader("Side"),
     cell: ({ row }) => <SideBadge side={row.original.side} />,
   },
   {
     accessorKey: "result",
-    header: "Result",
+    header: sortHeader("Result"),
     cell: ({ row }) => <ResultBadge result={row.original.result} />,
   },
   {
@@ -55,12 +55,12 @@ export const tradeColumns: ColumnDef<TradeGroup>[] = [
   },
   {
     accessorKey: "qty",
-    header: "Qty",
+    header: sortHeader("Qty"),
     cell: ({ row }) => <span className="tabular">{row.original.qty}</span>,
   },
   {
     accessorKey: "avgEntry",
-    header: "Avg Entry",
+    header: sortHeader("Avg Entry"),
     cell: ({ row }) => (
       <span className="tabular">{formatNumber(row.original.avgEntry)}</span>
     ),
@@ -87,7 +87,7 @@ export const tradeColumns: ColumnDef<TradeGroup>[] = [
   },
   {
     accessorKey: "rMultiple",
-    header: "R",
+    header: sortHeader("R"),
     cell: ({ row }) =>
       row.original.rMultiple != null ? (
         <span className="tabular">{row.original.rMultiple}R</span>
@@ -97,7 +97,7 @@ export const tradeColumns: ColumnDef<TradeGroup>[] = [
   },
   {
     accessorKey: "holdingMinutes",
-    header: "Hold",
+    header: sortHeader("Hold"),
     cell: ({ row }) => (
       <span className="tabular text-muted-foreground">
         {formatDuration(row.original.holdingMinutes)}

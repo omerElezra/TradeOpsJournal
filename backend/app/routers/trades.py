@@ -14,9 +14,16 @@ router = APIRouter(prefix="/api/v1/trades", tags=["trades"])
 
 _SORT_KEYS = {
     "entryTime": lambda t: t.entry_time,
+    "exitTime": lambda t: (t.exit_time or t.entry_time),
     "netPnl": lambda t: t.net_pnl,
     "returnPct": lambda t: t.return_pct,
     "symbol": lambda t: t.symbol,
+    "side": lambda t: t.side,
+    "result": lambda t: t.result,
+    "qty": lambda t: t.qty,
+    "avgEntry": lambda t: t.avg_entry,
+    "rMultiple": lambda t: (t.r_multiple if t.r_multiple is not None else float("-inf")),
+    "holdingMinutes": lambda t: (t.holding_minutes if t.holding_minutes is not None else -1),
 }
 
 
