@@ -92,6 +92,9 @@ class RangeWindow(CamelModel):
 class MetricsSummary(CamelModel):
     range: RangeWindow
     total_trades: int
+    wins: int = 0
+    losses: int = 0
+    breakevens: int = 0
     win_rate: float
     profit_factor: float
     net_roi: float
@@ -102,6 +105,7 @@ class MetricsSummary(CamelModel):
     avg_loss: float
     expectancy: float
     max_drawdown: float
+    total_commission: float = 0.0
     deltas: MetricDeltas = Field(default_factory=MetricDeltas)
     currency: str = "USD"
 
@@ -188,6 +192,16 @@ class CashTransactionRow(CamelModel):
     rate: Optional[float] = None
     net_cash: Optional[float] = None
     commission: Optional[float] = None
+    txn_type: Optional[str] = None  # "deposit" | "sweep"
+
+
+class CashSummary(CamelModel):
+    total_transactions: int
+    net_cash: float
+    total_inflows: float
+    total_outflows: float
+    total_commission: float
+    total_deposited_usd: float  # estimated USD value of deposit conversions
 
 
 # ---------------------------------------------------------------------------

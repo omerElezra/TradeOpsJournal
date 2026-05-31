@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 
 from app.core.ranges import resolve_range
 from app.db import queries
-from app.domain.models import CashTransactionRow, Paginated
+from app.domain.models import CashSummary, CashTransactionRow, Paginated
 
 router = APIRouter(prefix="/api/v1/cash", tags=["cash"])
 
@@ -43,6 +43,23 @@ def list_cash(
     return Paginated[CashTransactionRow](data=items, next_cursor=next_cursor, total=total)
 
 
+@router.get("/summary", response_model=CashSummary)
+def cash_summary(
+    range: Optional[str] = Query("90d"),
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None),
+) -> CashSummary:
+    start, end = resolve_range(range, from_, to)
+    data = queries.fetch_cash_summary(start, end)
+    return CashSummary(**data)
+
+
+def _classify_txn(r: dict) -> str:
+    """Classify a cash row as 'deposit' (real capital) or 'sweep' (residual FX)."""
+    qty = float(r.get("quantity") or 0)
+    return "deposit" if qty > 50 else "sweep"
+
+
 def _to_dto(r: dict) -> CashTransactionRow:
     from app.db.queries import _parse, _f
     return CashTransactionRow(
@@ -56,6 +73,7 @@ def _to_dto(r: dict) -> CashTransactionRow:
         rate=_f(r.get("rate")),
         net_cash=_f(r.get("net_cash")),
         commission=_f(r.get("commission")),
+        txn_type=_classify_txn(r),
     )
 
 

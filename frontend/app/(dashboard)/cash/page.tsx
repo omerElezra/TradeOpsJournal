@@ -2,11 +2,12 @@
 
 import * as React from "react";
 import { useRange } from "@/components/range-context";
-import { useCash } from "@/hooks/use-cash";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { useCash, useCashSummary } from "@/hooks/use-cash";
+import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
 import { MetricCard } from "@/components/metrics/metric-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -40,6 +41,8 @@ export default function CashPage() {
     cursor: cursor || undefined,
   });
 
+  const { data: summary, isLoading: summaryLoading } = useCashSummary(range);
+
   React.useEffect(() => {
     if (!data) return;
     if (isLoadMore.current) {
@@ -52,45 +55,52 @@ export default function CashPage() {
     setTotal(data.total);
   }, [data]);
 
-  // Summary stats across loaded rows
-  const runningTotal = allRows.reduce((sum, r) => sum + (r.netCash ?? 0), 0);
-  const totalCommission = allRows.reduce((sum, r) => sum + (r.commission ?? 0), 0);
-  const totalInflows = allRows.reduce((sum, r) => sum + (r.netCash != null && r.netCash > 0 ? r.netCash : 0), 0);
-  const totalOutflows = allRows.reduce((sum, r) => sum + (r.netCash != null && r.netCash < 0 ? r.netCash : 0), 0);
-
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">Cash</h1>
+        <h1 className="text-lg font-semibold">Cash &amp; FX</h1>
         <p className="text-sm text-muted-foreground">
-          FX conversions and cash income from the cash_transactions table.
+          FX conversions, deposits, and cash activity. Deposits are highlighted in blue.
         </p>
       </div>
 
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {/* ── KPI cards ── server-side aggregated across full range ── */}
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <MetricCard
           label="Total Transactions"
-          value={total > 0 ? String(total) : "—"}
+          value={summary ? String(summary.totalTransactions) : "—"}
           intent="neutral"
-          isLoading={isLoading}
+          isLoading={summaryLoading}
         />
         <MetricCard
-          label="Net Cash (loaded)"
-          value={allRows.length ? formatNumber(runningTotal) : "—"}
-          intent={runningTotal >= 0 ? "positive" : "negative"}
-          isLoading={isLoading}
-        />
-        <MetricCard
-          label="Inflows (loaded)"
-          value={allRows.length ? formatNumber(totalInflows) : "—"}
+          label="Total Deposited (USD)"
+          value={summary ? formatCurrency(summary.totalDepositedUsd) : "—"}
           intent="positive"
-          isLoading={isLoading}
+          isLoading={summaryLoading}
         />
         <MetricCard
-          label="Outflows (loaded)"
-          value={allRows.length ? formatNumber(totalOutflows) : "—"}
-          intent={totalOutflows < 0 ? "negative" : "neutral"}
-          isLoading={isLoading}
+          label="Net Cash"
+          value={summary ? formatNumber(summary.netCash) : "—"}
+          intent={summary && summary.netCash >= 0 ? "positive" : "negative"}
+          isLoading={summaryLoading}
+        />
+        <MetricCard
+          label="Inflows"
+          value={summary ? formatNumber(summary.totalInflows) : "—"}
+          intent="positive"
+          isLoading={summaryLoading}
+        />
+        <MetricCard
+          label="Outflows"
+          value={summary ? formatNumber(summary.totalOutflows) : "—"}
+          intent={summary && summary.totalOutflows < 0 ? "negative" : "neutral"}
+          isLoading={summaryLoading}
+        />
+        <MetricCard
+          label="Commission Paid"
+          value={summary ? formatNumber(summary.totalCommission) : "—"}
+          intent={summary && summary.totalCommission < 0 ? "negative" : "neutral"}
+          isLoading={summaryLoading}
         />
       </section>
 
@@ -119,13 +129,13 @@ export default function CashPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Time</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Symbol / Pair</TableHead>
-                <TableHead>Description</TableHead>
                 <TableHead>Action</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Rate</TableHead>
-                <TableHead>Net Cash</TableHead>
-                <TableHead>Commission</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Rate</TableHead>
+                <TableHead className="text-right">Value</TableHead>
+                <TableHead className="text-right">Commission</TableHead>
                 <TableHead>Currency</TableHead>
               </TableRow>
             </TableHeader>
@@ -141,37 +151,49 @@ export default function CashPage() {
                   </TableRow>
                 ))
               ) : allRows.length ? (
-                allRows.map((row, i) => (
-                  <TableRow key={`${row.transactionId}-${i}`}>
-                    <TableCell className="tabular text-muted-foreground">
-                      {formatDateTime(row.execTime)}
-                    </TableCell>
-                    <TableCell className="font-semibold">{row.symbol}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-muted-foreground">
-                      {row.description ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {row.action ?? "—"}
-                    </TableCell>
-                    <TableCell className="tabular">{row.quantity}</TableCell>
-                    <TableCell className="tabular">
-                      {row.rate != null ? formatNumber(row.rate, 4) : "—"}
-                    </TableCell>
-                    <TableCell
-                      className={`tabular font-medium ${
-                        (row.netCash ?? 0) >= 0 ? "text-positive" : "text-negative"
-                      }`}
+                allRows.map((row, i) => {
+                  const isDeposit = row.txnType === "deposit";
+                  return (
+                    <TableRow
+                      key={`${row.transactionId}-${i}`}
+                      className={isDeposit ? "bg-blue-500/5" : undefined}
                     >
-                      {row.netCash != null ? formatNumber(row.netCash) : "—"}
-                    </TableCell>
-                    <TableCell className="tabular">
-                      {row.commission != null ? formatNumber(row.commission) : "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {row.currency ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))
+                      <TableCell className="tabular text-muted-foreground">
+                        {formatDateTime(row.execTime)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={isDeposit ? "positive" : "neutral"}>
+                          {isDeposit ? "Deposit" : "Sweep"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-semibold">{row.symbol}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.action ?? "—"}
+                      </TableCell>
+                      <TableCell className="tabular text-right">
+                        {formatNumber(row.quantity)}
+                      </TableCell>
+                      <TableCell className="tabular text-right">
+                        {row.rate != null ? formatNumber(row.rate, 4) : "—"}
+                      </TableCell>
+                      <TableCell
+                        className={`tabular text-right font-medium ${
+                          (row.netCash ?? 0) > 0 ? "text-positive" : "text-muted-foreground"
+                        }`}
+                      >
+                        {row.netCash != null ? formatNumber(row.netCash) : "—"}
+                      </TableCell>
+                      <TableCell className="tabular text-right text-muted-foreground">
+                        {row.commission != null && row.commission !== 0
+                          ? formatNumber(row.commission)
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.currency ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell

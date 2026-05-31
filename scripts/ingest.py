@@ -263,7 +263,10 @@ def transform_cash(cash_rows):
 
     df["quantity"]  = pd.to_numeric(col("Quantity"),    errors="coerce").abs()
     df["rate"]      = pd.to_numeric(col("TradePrice"),  errors="coerce")   # FX rate
-    df["net_cash"]  = pd.to_numeric(col("NetCash"),     errors="coerce")
+    raw_net         = pd.to_numeric(col("NetCash"),     errors="coerce")
+    # IBKR leaves NetCash blank/zero for FX CASH rows — compute from qty × rate
+    computed_net    = df["quantity"] * df["rate"]
+    df["net_cash"]  = raw_net.where(raw_net.notna() & (raw_net != 0), computed_net)
     df["commission"]= pd.to_numeric(col("IBCommission"),errors="coerce")
 
     df.dropna(subset=["symbol", "transaction_date", "quantity"], inplace=True)

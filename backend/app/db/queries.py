@@ -200,3 +200,59 @@ def fetch_cash_page(
     resp = q.execute()
     total = resp.count or 0
     return resp.data or [], total
+
+
+def fetch_cash_summary(
+    start: datetime,
+    end: datetime,
+) -> dict:
+    """Aggregate cash stats across the full date range (not paginated)."""
+    client = get_supabase()
+    if client is None:
+        return {
+            "total_transactions": 0,
+            "net_cash": 0,
+            "total_inflows": 0,
+            "total_outflows": 0,
+            "total_commission": 0,
+            "total_deposited_usd": 0,
+        }
+
+    resp = (
+        client.table("cash_transactions")
+        .select("quantity, rate, net_cash, commission, symbol, currency")
+        .gte("exec_time", start.isoformat())
+        .lte("exec_time", end.isoformat())
+        .execute()
+    )
+    rows = resp.data or []
+    total_txns = len(rows)
+    total_net = 0.0
+    total_inflows = 0.0
+    total_outflows = 0.0
+    total_commission = 0.0
+    total_deposited_usd = 0.0
+
+    for r in rows:
+        nc = float(r.get("net_cash") or 0)
+        total_net += nc
+        if nc > 0:
+            total_inflows += nc
+        else:
+            total_outflows += nc
+        total_commission += float(r.get("commission") or 0)
+        # Estimate USD deposit value for large ILS→USD conversions
+        qty = float(r.get("quantity") or 0)
+        rate = float(r.get("rate") or 0)
+        sym = r.get("symbol", "")
+        if qty > 50 and ".ILS" in sym.upper():
+            total_deposited_usd += qty / rate if rate else 0
+
+    return {
+        "total_transactions": total_txns,
+        "net_cash": round(total_net, 2),
+        "total_inflows": round(total_inflows, 2),
+        "total_outflows": round(total_outflows, 2),
+        "total_commission": round(total_commission, 2),
+        "total_deposited_usd": round(total_deposited_usd, 2),
+    }

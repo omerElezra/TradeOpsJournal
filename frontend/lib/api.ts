@@ -1,5 +1,6 @@
 import type {
   CashQuery,
+  CashSummary,
   CashTransaction,
   EquityPoint,
   ExecutionQuery,
@@ -68,4 +69,7 @@ export const api = {
 
   getCash: (params: CashQuery) =>
     request<Paginated<CashTransaction>>(`/api/v1/cash${qs({ ...params })}`),
+
+  getCashSummary: (range: Range) =>
+    request<CashSummary>(`/api/v1/cash/summary${qs({ range })}`),
 };
