@@ -57,10 +57,18 @@ def summary_from_groups(
             total_trades=metrics.total_trades(groups) - metrics.total_trades(prev),
         )
 
+    closed = [g for g in groups if g.status == "CLOSED"]
+    wins = sum(1 for g in closed if g.result == "WIN")
+    losses = sum(1 for g in closed if g.result == "LOSS")
+    breakevens = sum(1 for g in closed if g.result == "BREAKEVEN")
+    total_commission = round(sum(g.commission for g in closed), 2)
     currency = groups[0].currency if groups else "USD"
     return MetricsSummary(
         range=RangeWindow.model_validate({"from": start, "to": end}),
         total_trades=metrics.total_trades(groups),
+        wins=wins,
+        losses=losses,
+        breakevens=breakevens,
         win_rate=metrics.win_rate(groups),
         profit_factor=metrics.profit_factor(groups),
         net_roi=metrics.net_roi(groups),
@@ -71,6 +79,7 @@ def summary_from_groups(
         avg_loss=metrics.avg_loss(groups),
         expectancy=metrics.expectancy(groups),
         max_drawdown=metrics.max_drawdown(groups),
+        total_commission=total_commission,
         deltas=deltas,
         currency=currency,
     )
