@@ -19,11 +19,23 @@ Status: Done.
 
 Add a compact closed/open trade table above the expanders with symbol, status, quantity, average prices, hold time, P&L, P&L percent, and commission.
 
+Enhancements added:
+- Setup and Psych Tags columns pulled from journal data.
+- Journal indicator column (✏️ / —) to spot unjournaled trades.
+- Net P&L column (gross P&L + commission).
+- R-multiple column (actual net P&L / planned risk).
+- Green/red color styling on P&L %, Net P&L, and R columns.
+- Open-trade P&L % suppressed (partial realized P&L was misleading).
+
 ## 3. Journaling UI
 
 Status: Done.
 
 Inside each expanded trade, add setup selection, psychological tag controls, and user notes. Persisted via `trade_journal` table keyed by `(symbol, entry_time)`. Migration at `scripts/migrations/001_trade_journal.sql`.
+
+Enhancements added:
+- Planned Stop, Planned Target, and Risk Amount fields for R-multiple tracking.
+- Migration at `scripts/migrations/002_journal_risk_fields.sql`.
 
 ## 4. AI Coach Question
 
