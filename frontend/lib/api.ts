@@ -15,7 +15,9 @@ import type {
   TradeQuery,
 } from "@/types";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Empty BASE → all requests go to the same Next.js origin (relative URLs).
+// The FastAPI backend is no longer used — routes live under /api/v1/*.
+const BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

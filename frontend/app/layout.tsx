@@ -11,6 +11,7 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "TradeOps Journal",
   description: "Personal trading journal — analytics & AI coaching",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
