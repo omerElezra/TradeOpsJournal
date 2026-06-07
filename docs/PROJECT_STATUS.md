@@ -1,98 +1,84 @@
 # Project Status
 
+**Last updated:** June 2026
+
 ## Current State
 
-TradeOpsJournal is a Python-based automated trading journal for IBKR activity statements.
-
-The current implementation supports:
-
-- Gmail ingestion of IBKR Activity Flex CSV attachments.
-- Parsing stock execution rows from IBKR CSV files.
-- Parsing cash / FX execution rows from IBKR CSV files.
-- Deduplicated upsert into Supabase.
-- A Streamlit dashboard for P&L, trade grouping, executions, and cash/FX transactions.
-- Daily scheduled ingestion through GitHub Actions.
+TradeOpsJournal is a working Next.js web application deployed to Vercel, backed by Supabase. The original Streamlit UI and the intermediate FastAPI backend have been replaced.
 
 ## Repository Structure
 
 | Path | Role |
 |---|---|
-| `app/streamlit_app.py` | Streamlit UI and analytics logic. |
-| `scripts/ingest.py` | Gmail → IBKR CSV parsing → Supabase ingestion pipeline. |
-| `scripts/get_gmail_token.py` | One-time local Gmail OAuth refresh-token helper. |
-| `scripts/migrations/001_trade_journal.sql` | DDL migration that creates the `trade_journal` table. |
-| `scripts/run_migration.py` | Helper to apply SQL migrations via the Supabase Management API. |
-| `.github/workflows/daily_ingest.yml` | Daily and manual GitHub Actions ingestion workflow. |
-| `requirements.txt` | Python runtime dependencies. |
-| `.env.example` | Required local environment variable template. |
-| `README.md` | Quick-start setup instructions. |
+| `frontend/` | Next.js 14 app — API routes + React UI |
+| `frontend/app/api/v1/` | Server-side route handlers (replaces FastAPI) |
+| `frontend/lib/domain/` | Pure TypeScript trade grouping + metric logic |
+| `frontend/lib/queries/` | Supabase read/write functions |
+| `frontend/lib/supabase/server.ts` | Admin Supabase client (server-only) |
+| `frontend/components/` | React UI components |
+| `scripts/ingest.py` | Gmail → IBKR CSV → Supabase ingestion |
+| `scripts/get_gmail_token.py` | One-time Gmail OAuth token helper |
+| `scripts/run_migration.py` | Apply SQL migrations via Supabase API |
+| `scripts/migrations/` | DDL migrations for Supabase |
+| `.github/workflows/daily_ingest.yml` | Daily ingestion GitHub Actions workflow |
+| `requirements.txt` | Python deps for ingestion scripts |
+| `archive/` | Superseded code (Streamlit, FastAPI, Docker) |
 
 ## Implemented Functionality
 
 ### Ingestion
 
-- Authenticates to Gmail using OAuth2 refresh-token credentials.
-- Searches Gmail for messages from `Info@inter-il.com` with subject `Activity Flex`, attachments, and a configurable lookback window.
-- Paginates Gmail results with up to 500 messages per page.
-- Downloads the first CSV attachment from each matching email.
-- Parses common IBKR CSV encodings: UTF-8, Latin-1, and CP1252.
-- Handles IBKR timestamp strings with timezone suffixes such as `EDT`, `EST`, and `UTC`.
-- Separates `STK` executions from `CASH` executions.
-- Generates stable unique IDs using IBKR `TradeID` when available, with hash fallback.
-- Upserts stock trades into `trades` using `trade_id` conflict handling.
-- Upserts cash/FX transactions into `cash_transactions` using `transaction_id` conflict handling.
-- Prints detailed ingestion summaries for local runs and GitHub Actions logs.
+- Gmail OAuth2 authentication via refresh token.
+- Searches for IBKR Activity Flex CSV emails.
+- Parses STK (stock) and CASH (FX/cash) execution rows.
+- Handles IBKR timestamp formats including EDT/EST/UTC suffixes and DD/MM/YYYY.
+- Deduplicates via `trade_id` / `transaction_id` on upsert.
+- Runs automatically Mon–Fri at 08:00 UTC via GitHub Actions.
 
-### Streamlit Dashboard
+### Domain Logic (server-side TypeScript)
 
-- Reads Supabase data with a five-minute cache.
-- Supports date filtering: all time, today, this week, this month, YTD, or custom range.
-- Displays overview metrics:
-  - Gross P&L
-  - Commission
-  - Net P&L
-  - Win rate
-  - Closed trades count
-  - Average P&L per closed trade
-  - Best day
-  - Worst day
-- Displays charts:
-  - Daily P&L bar chart
-  - Equity curve
-  - P&L by symbol
-- Groups executions into full trades by symbol and position closure.
-- Shows open and closed trade status.
-- Shows execution-level details for every grouped trade.
-- Shows all executions in a sortable table.
-- Shows cash/FX transaction metrics and inferred USD/ILS movement.
-- Displays per-trade journaling controls inside each trade expander: setup selection, psychological tags, and free-text notes persisted to Supabase.
+- FIFO round-trip trade grouping by symbol.
+- Win rate, gross profit/loss, profit factor.
+- Net P&L, average win/loss, expectancy.
+- Net ROI, max drawdown.
+- Equity curve (cumulative P&L over time).
+- R-multiple (net P&L / planned risk, when journal has risk amount).
+- Holding time in minutes.
 
-### Automation
+### API Layer
 
-- GitHub Actions runs ingestion Monday-Friday at 08:00 UTC.
-- Manual workflow dispatch supports configurable `days_back` and `timeout_minutes`.
-- Workflow uses Python 3.11 and pip dependency caching.
+All routes under `/api/v1/`:
 
-## Current Limitations
-
-| Area | Limitation |
+| Route | Status |
 |---|---|
-| Database alignment | The documentation now includes the expected schema, but the live Supabase project still needs to be verified or migrated to include `exec_time` and `cash_transactions`. |
-| Authentication | Streamlit currently uses `SUPABASE_SERVICE_KEY`; this is acceptable only in trusted server-side environments and must not be exposed to browsers. |
-| Trade grouping | Trade grouping is position-based per symbol and may not fully support shorts, partial exits, options, multi-leg strategies, or complex scaling behavior. |
-| AI coaching | No AI, question generation, or behavioral feedback loop exists yet. |
-| User input | The journal captures setup, psych tags, and notes per trade. Screenshots, plan thesis, and post-trade reviews are not yet supported. |
-| Testing | No automated tests are currently present. |
-| Packaging | No `pyproject.toml`, app factory, or formal module structure exists yet. |
+| `GET /metrics/summary` | Working |
+| `GET /metrics/equity-curve` | Working |
+| `GET /trades` | Working — pagination, sort, filter by symbol/side/result |
+| `GET /trades/:id` | Working — includes executions, markers, journal |
+| `GET /executions` | Working — paginated raw fills |
+| `GET /cash` | Working — paginated cash transactions |
+| `GET /cash/summary` | Working |
+| `POST /journal` | Working — upserts journal entry |
+| `GET /insights` | Stub — returns empty array |
 
-## Immediate Recommended Fixes
+### UI
 
-1. Update Supabase schema to match the current code.
-2. Add automated tests for parsing, transformation, ID generation, and trade grouping.
-3. Split Streamlit UI, Supabase access, trade analytics, and formatting helpers into modules.
-4. Add AI coaching questions once sufficient journal entries are collected to provide meaningful context.
-5. Move toward a secure web architecture where privileged Supabase keys are used only server-side.
+- Dashboard with KPI row and equity curve card.
+- Trade table with sort and filter controls.
+- Trade detail page with execution breakdown.
+- Cash / transactions page.
+- Journal entry editing per trade.
+- PWA manifest — installable to phone home screen via "Add to Home Screen".
+- Dark theme, responsive layout.
 
-## Current Development Priority
+## Known Gaps
 
-The project should first become a reliable structured trading journal. The AI coach should be added after the system captures enough context about each trade to evaluate decision quality.
+| Area | Status |
+|---|---|
+| Authentication | Not implemented. App is unprotected — keep URL private or use Vercel password protection. |
+| Equity curve chart | `EquityCurveCard` renders placeholder — Recharts not yet installed. |
+| AI insights | `/api/v1/insights` returns empty array. No AI backend exists yet. |
+| Journal UI completeness | Basic journal fields work; full review flow (screenshots, post-trade analysis) not built. |
+| PWA icons | `public/icons/icon-192.png` and `icon-512.png` placeholder paths referenced in manifest — actual icon files not yet added. |
+| Short selling | Trade grouping assumes long trades. Shorts may not group correctly. |
+| Options / multi-leg | Not supported in grouping or metrics. |

@@ -1,50 +1,67 @@
-# TradeOpsJournal Next Steps
+# Next Steps
 
-This file tracks practical follow-up work from the PRD that can be added to the Streamlit app and data pipeline.
+## 1. Add Authentication
 
-## 1. Search and Filter Controls
+**Status:** Not started.
 
-Status: Done.
+The app is currently unprotected — anyone with the URL can read it. Since this is a single-user private app, the easiest options are:
 
-Add ticker/search, action/status, and outcome filters to the main ledger views so trades can be inspected quickly without scrolling through every row.
+- **Vercel password protection** (one-click in Vercel dashboard, Vercel Pro required)
+- **Supabase Auth** — add a login page, protect route handlers with `requireUser()`, enable Row Level Security on all tables
 
-Target areas:
-- Full Trades: symbol search, status filter, outcome filter.
-- All Executions: symbol search, action filter, P&L filter.
-- Transactions: pair search, direction filter, currency filter.
+The `lib/auth/` directory is a good place to add a `requireUser.ts` helper.
 
-## 2. Consolidated Trade Table
+## 2. Equity Curve Chart
 
-Status: Done.
+**Status:** `EquityCurveCard` renders a placeholder.
 
-Add a compact closed/open trade table above the expanders with symbol, status, quantity, average prices, hold time, P&L, P&L percent, and commission.
+Install Recharts and build the actual chart:
 
-Enhancements added:
-- Setup and Psych Tags columns pulled from journal data.
-- Journal indicator column (✏️ / —) to spot unjournaled trades.
-- Net P&L column (gross P&L + commission).
-- R-multiple column (actual net P&L / planned risk).
-- Green/red color styling on P&L %, Net P&L, and R columns.
-- Open-trade P&L % suppressed (partial realized P&L was misleading).
+```bash
+cd frontend && npm install recharts
+```
 
-## 3. Journaling UI
+The data is already served by `GET /api/v1/metrics/equity-curve`.
 
-Status: Done.
+## 3. PWA Icons
 
-Inside each expanded trade, add setup selection, psychological tag controls, and user notes. Persisted via `trade_journal` table keyed by `(symbol, entry_time)`. Migration at `scripts/migrations/001_trade_journal.sql`.
+**Status:** `public/manifest.json` references `/icons/icon-192.png` and `/icons/icon-512.png` — these files do not exist yet.
 
-Enhancements added:
-- Planned Stop, Planned Target, and Risk Amount fields for R-multiple tracking.
-- Migration at `scripts/migrations/002_journal_risk_fields.sql`.
+Add 192×192 and 512×512 PNG icons to `frontend/public/icons/` so the "Add to Home Screen" install looks correct.
 
-## 4. AI Coach Question
+## 4. AI Insights Backend
 
-Generate one targeted coaching question per closed trade using the trade context packet described in the PRD. Start with deterministic local rules, then connect an LLM later.
+**Status:** `/api/v1/insights` returns an empty array (stub).
 
-## 5. Context Enrichment
+When enough journal entries exist:
 
-Display sector and SPY 50EMA regime once enrichment is available in Supabase.
+1. Create an `ai_insights` table in Supabase (see `docs/DATA_MODEL.md`).
+2. Build an insight generator — start with deterministic rules (e.g. "you lose more on Fridays"), then connect an LLM.
+3. Write generated insights to `ai_insights`.
+4. Return them from the `/api/v1/insights` route.
 
-## 6. Trade Quality Dashboard
+## 5. Journal UI Completeness
 
-Add charts for P&L by setup, P&L by psychological tag, win rate by setup, hold time by outcome, and recurring mistake tags.
+**Status:** Basic fields (setup, psych tags, notes, risk amount) work via `POST /api/v1/journal`.
+
+Still missing from the UI:
+- Post-trade review form with structured fields.
+- Screenshot / chart attachment upload.
+- Pre-trade plan vs actual comparison.
+
+## 6. Analytics Pages
+
+**Status:** `/analytics` page is a placeholder (`145 B`).
+
+Suggested charts to build:
+- P&L by setup type.
+- Win rate by day of week / time of day.
+- Hold time vs outcome.
+- Recurring mistake tags frequency.
+- P&L by psychological tag.
+
+## 7. Short Selling Support
+
+**Status:** Trade grouping assumes longs. SHORT trades may not group correctly if position goes negative.
+
+The `grouping.ts` `_signed` function correctly handles sign, but `result` and `avgEntry`/`avgExit` labels need validation against real short trade data.

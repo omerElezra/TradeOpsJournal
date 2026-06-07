@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan turns the current IBKR ingestion + Streamlit dashboard into a more complete trading journal and, later, an AI coaching web application. The work is ordered to protect the existing ingestion pipeline while progressively adding structure, tests, journaling, and AI feedback loops.
+This plan turns the current IBKR ingestion + UI dashboard into a more complete trading journal and, later, an AI coaching web application. The work is ordered to protect the existing ingestion pipeline while progressively adding structure, tests, journaling, and AI feedback loops.
 
 ## Requirement Ledger
 

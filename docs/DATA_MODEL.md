@@ -2,38 +2,35 @@
 
 ## Overview
 
-The current application expects two Supabase tables:
+Three Supabase tables are used by the current application:
 
-- `trades` — stock execution records.
-- `cash_transactions` — cash and FX execution records.
+| Table | Role |
+|---|---|
+| `trades` | Individual stock execution fills (from IBKR ingestion) |
+| `cash_transactions` | Cash and FX execution rows (from IBKR ingestion) |
+| `trade_journal` | User journal notes per trade group (written from the UI) |
 
-The current `README.md` setup SQL only covers part of the expected `trades` schema. The schema below is inferred from the current code and should be used to align the database.
+---
 
 ## Table: `trades`
 
-### Purpose
+Stores individual stock execution fills parsed from IBKR `STK` rows.
 
-Stores individual stock executions parsed from IBKR `STK` rows.
-
-### Expected Columns
-
-| Column | Type | Required | Source / Meaning |
-|---|---:|---:|---|
-| `id` | `BIGSERIAL` | No | Internal primary key. |
-| `trade_id` | `TEXT` | Yes | Unique stable execution ID. Uses IBKR `TradeID` when available, hash fallback otherwise. |
-| `trade_date` | `DATE` | Yes | Date derived from IBKR execution timestamp. |
-| `exec_time` | `TIMESTAMPTZ` | Yes | Execution timestamp. Required by Streamlit sorting and grouping. |
-| `symbol` | `TEXT` | Yes | Stock symbol. |
-| `action` | `TEXT` | Yes | `BUY` or `SELL`. |
-| `quantity` | `NUMERIC` | Yes | Absolute execution quantity. |
-| `price` | `NUMERIC` | Yes | Execution price. |
-| `proceeds` | `NUMERIC` | No | Net cash / proceeds from IBKR. |
-| `commission` | `NUMERIC` | No | IBKR commission. |
-| `realized_pnl` | `NUMERIC` | No | FIFO realized P&L from IBKR. |
-| `currency` | `TEXT` | No | Primary currency, usually `USD`. |
-| `created_at` | `TIMESTAMPTZ` | No | Insert timestamp. |
-
-### Recommended SQL
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `BIGSERIAL` | — | Internal PK |
+| `trade_id` | `TEXT` UNIQUE | Yes | Stable execution ID — IBKR `TradeID` or hash fallback |
+| `trade_date` | `DATE` | Yes | Date from execution timestamp |
+| `exec_time` | `TIMESTAMPTZ` | Yes | Execution timestamp — used for grouping and sorting |
+| `symbol` | `TEXT` | Yes | Stock symbol |
+| `action` | `TEXT` | Yes | `BUY` or `SELL` |
+| `quantity` | `NUMERIC` | Yes | Absolute execution quantity |
+| `price` | `NUMERIC` | Yes | Execution price |
+| `proceeds` | `NUMERIC` | No | Net cash proceeds from IBKR |
+| `commission` | `NUMERIC` | No | IBKR commission |
+| `realized_pnl` | `NUMERIC` | No | FIFO realized P&L from IBKR |
+| `currency` | `TEXT` | No | Currency, default `USD` |
+| `created_at` | `TIMESTAMPTZ` | No | Insert timestamp |
 
 ```sql
 CREATE TABLE IF NOT EXISTS trades (
@@ -52,36 +49,31 @@ CREATE TABLE IF NOT EXISTS trades (
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date);
 CREATE INDEX IF NOT EXISTS idx_trades_exec_time ON trades(exec_time);
-CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_trades_symbol    ON trades(symbol);
 ```
+
+---
 
 ## Table: `cash_transactions`
 
-### Purpose
+Stores cash and FX execution rows from IBKR `CASH` rows.
 
-Stores cash and FX executions parsed from IBKR `CASH` rows.
-
-### Expected Columns
-
-| Column | Type | Required | Source / Meaning |
-|---|---:|---:|---|
-| `id` | `BIGSERIAL` | No | Internal primary key. |
-| `transaction_id` | `TEXT` | Yes | Unique stable cash transaction ID. Uses `cash_` + IBKR `TradeID` when available, hash fallback otherwise. |
-| `transaction_date` | `DATE` | Yes | Date derived from execution timestamp or order timestamp. |
-| `exec_time` | `TIMESTAMPTZ` | Yes | Execution timestamp used by the dashboard. |
-| `symbol` | `TEXT` | Yes | FX pair or cash symbol, for example `USD.ILS` or `ILS.USD`. |
-| `description` | `TEXT` | No | IBKR description. |
-| `action` | `TEXT` | No | `BUY` or `SELL` when available. |
-| `currency` | `TEXT` | No | Primary currency. |
-| `quantity` | `NUMERIC` | Yes | Absolute quantity. |
-| `rate` | `NUMERIC` | No | FX rate from IBKR `TradePrice`. |
-| `net_cash` | `NUMERIC` | No | Net cash from IBKR. |
-| `commission` | `NUMERIC` | No | IBKR commission. |
-| `created_at` | `TIMESTAMPTZ` | No | Insert timestamp. |
-
-### Recommended SQL
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `BIGSERIAL` | — | Internal PK |
+| `transaction_id` | `TEXT` UNIQUE | Yes | Stable ID — `cash_` + IBKR `TradeID` or hash fallback |
+| `transaction_date` | `DATE` | Yes | Date from timestamp |
+| `exec_time` | `TIMESTAMPTZ` | Yes | Execution timestamp |
+| `symbol` | `TEXT` | Yes | FX pair, e.g. `USD.ILS` |
+| `description` | `TEXT` | No | IBKR description |
+| `action` | `TEXT` | No | `BUY` / `SELL` when available |
+| `currency` | `TEXT` | No | Primary currency |
+| `quantity` | `NUMERIC` | Yes | Absolute quantity |
+| `rate` | `NUMERIC` | No | FX rate from IBKR `TradePrice` |
+| `net_cash` | `NUMERIC` | No | Net cash from IBKR |
+| `commission` | `NUMERIC` | No | IBKR commission |
+| `created_at` | `TIMESTAMPTZ` | No | Insert timestamp |
 
 ```sql
 CREATE TABLE IF NOT EXISTS cash_transactions (
@@ -100,83 +92,51 @@ CREATE TABLE IF NOT EXISTS cash_transactions (
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_cash_transactions_date ON cash_transactions(transaction_date);
 CREATE INDEX IF NOT EXISTS idx_cash_transactions_exec_time ON cash_transactions(exec_time);
-CREATE INDEX IF NOT EXISTS idx_cash_transactions_symbol ON cash_transactions(symbol);
+CREATE INDEX IF NOT EXISTS idx_cash_transactions_symbol    ON cash_transactions(symbol);
 ```
+
+---
+
+## Table: `trade_journal`
+
+Stores per-trade journal notes written from the UI. Each row maps to one grouped trade, identified by `(symbol, entry_time)` — the same key used by the trade grouping algorithm.
+
+Migration: `scripts/migrations/001_trade_journal.sql` + `002_journal_risk_fields.sql`
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `BIGSERIAL` | — | Internal PK |
+| `symbol` | `TEXT` | Yes | Stock symbol |
+| `entry_time` | `TIMESTAMPTZ` | Yes | `exec_time` of first execution in the group |
+| `setup` | `TEXT` | No | Setup label (e.g. "breakout", "pullback") |
+| `psych_tags` | `TEXT[]` | No | Psychological tags array |
+| `notes` | `TEXT` | No | Free-text notes |
+| `planned_stop` | `NUMERIC` | No | Planned stop price (for R-multiple) |
+| `planned_target` | `NUMERIC` | No | Planned target price |
+| `risk_amount` | `NUMERIC` | No | Dollar risk — used to compute R-multiple |
+| `updated_at` | `TIMESTAMPTZ` | No | Last write timestamp |
+| `created_at` | `TIMESTAMPTZ` | No | Insert timestamp |
+
+Unique constraint: `(symbol, entry_time)` — upsert uses this as the conflict key.
+
+```sql
+-- See scripts/migrations/001_trade_journal.sql
+-- See scripts/migrations/002_journal_risk_fields.sql
+```
+
+---
 
 ## Future Tables
 
-The AI coaching product will need more structured user input than execution rows.
+### `ai_insights`
 
-### `journal_entries`
+Purpose: store AI-generated observations per trade or period.
 
-Purpose: capture user intent, context, and review notes.
+Suggested fields: `id`, `trade_group_id`, `type` (STRENGTH / WEAKNESS / PATTERN / WARNING), `title`, `summary`, `recommendation`, `confidence`, `evidence_trade_ids`, `status` (new / accepted / dismissed), `created_at`.
 
-Suggested fields:
+### `user_settings`
 
-- `id`
-- `trade_group_id`
-- `user_id`
-- `entry_type` — plan, pre-trade, in-trade, post-trade, weekly review.
-- `content`
-- `emotion`
-- `confidence`
-- `created_at`
+Purpose: per-user preferences.
 
-### `trade_reviews`
-
-Purpose: structured post-trade evaluation.
-
-Suggested fields:
-
-- `id`
-- `trade_group_id`
-- `followed_plan`
-- `mistake_tags`
-- `setup_tags`
-- `lesson_learned`
-- `what_to_repeat`
-- `what_to_stop`
-- `created_at`
-
-### `ai_coach_insights`
-
-Purpose: store AI-generated observations and recommendations.
-
-Suggested fields:
-
-- `id`
-- `user_id`
-- `trade_group_id`
-- `insight_type`
-- `summary`
-- `evidence`
-- `recommendation`
-- `confidence`
-- `status` — new, accepted, dismissed, completed.
-- `created_at`
-
-### `ai_coach_questions`
-
-Purpose: store AI questions asked to the trader and the answers.
-
-Suggested fields:
-
-- `id`
-- `user_id`
-- `trade_group_id`
-- `question`
-- `reason_for_question`
-- `answer`
-- `status` — open, answered, skipped.
-- `created_at`
-- `answered_at`
-
-## Data Quality Rules
-
-- Every imported execution must have a stable unique ID.
-- Ingestion must be idempotent.
-- Timestamps should be stored in a consistent timezone.
-- Raw imported CSV files or normalized raw rows should eventually be archived for auditability.
-- AI-generated analysis should keep evidence links back to source trades or journal entries.
+Suggested fields: `user_id`, `base_currency`, `default_range`, `created_at`.

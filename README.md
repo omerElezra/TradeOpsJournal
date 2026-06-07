@@ -1,107 +1,99 @@
-# Trading Journal
+# TradeOpsJournal
 
-Automated trading journal for IBKR stock trades.
+Personal trading journal for IBKR stock trades — always accessible from laptop and phone.
 
-**Pipeline:** Gmail (IBKR CSV) → GitHub Actions (daily cron) → Supabase → Streamlit UI
-
-## Project documentation
-
-The project now has a full documentation set in [`docs/`](docs/):
-
-| Document | Purpose |
-|---|---|
-| [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | Current system status, implemented functionality, known gaps, and risks. |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Current and target architecture for the future web app + AI coach. |
-| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Supabase schema for current and future tables. |
-| [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Product requirements for the journal and future AI trading coach. |
-| [`docs/PRODUCT_PLAN.md`](docs/PRODUCT_PLAN.md) | Milestones, tasks, risks, and traceability. |
-| [`docs/AI_COACHING_VISION.md`](docs/AI_COACHING_VISION.md) | Future AI coach behavior, questions, recommendations, and safety boundaries. |
+**Stack:** Next.js (Vercel) · Supabase (PostgreSQL) · GitHub Actions (IBKR ingestion)
 
 ---
 
-## Quick Start
+## Architecture
 
-### 1. Create the Supabase table
-
-Run this SQL in your Supabase project's SQL editor:
-
-```sql
-CREATE TABLE trades (
-  id              BIGSERIAL PRIMARY KEY,
-  trade_id        TEXT UNIQUE NOT NULL,
-  trade_date      DATE NOT NULL,
-  exec_time       TIMESTAMPTZ NOT NULL,
-  symbol          TEXT NOT NULL,
-  action          TEXT NOT NULL CHECK (action IN ('BUY', 'SELL')),
-  quantity        NUMERIC NOT NULL,
-  price           NUMERIC NOT NULL,
-  proceeds        NUMERIC,
-  commission      NUMERIC,
-  realized_pnl    NUMERIC,
-  currency        TEXT DEFAULT 'USD',
-  created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_trades_date   ON trades(trade_date);
-CREATE INDEX idx_trades_exec_time ON trades(exec_time);
-CREATE INDEX idx_trades_symbol ON trades(symbol);
-
-CREATE TABLE cash_transactions (
-  id                BIGSERIAL PRIMARY KEY,
-  transaction_id    TEXT UNIQUE NOT NULL,
-  transaction_date  DATE NOT NULL,
-  exec_time         TIMESTAMPTZ NOT NULL,
-  symbol            TEXT NOT NULL,
-  description       TEXT,
-  action            TEXT,
-  currency          TEXT,
-  quantity          NUMERIC NOT NULL,
-  rate              NUMERIC,
-  net_cash          NUMERIC,
-  commission        NUMERIC,
-  created_at        TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_cash_transactions_date ON cash_transactions(transaction_date);
-CREATE INDEX idx_cash_transactions_exec_time ON cash_transactions(exec_time);
-CREATE INDEX idx_cash_transactions_symbol ON cash_transactions(symbol);
+```
+IBKR Activity Flex CSV
+        │
+        ▼
+   Gmail Inbox
+        │
+        ▼
+GitHub Actions (daily cron)
+        │
+        ▼
+ scripts/ingest.py
+        │
+        ▼
+   Supabase DB
+   (trades, cash_transactions, trade_journal)
+        │
+        ▼
+  Next.js (Vercel)
+  /api/v1/* route handlers → domain logic → JSON
+        │
+        ▼
+  React UI (browser / phone PWA)
 ```
 
-See [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) for details and future tables planned for journaling and AI coaching.
+The Next.js app handles everything: API routes run server-side TypeScript that queries Supabase directly, groups FIFO trades, computes KPIs, and serves JSON to the React frontend. There is no separate backend.
 
-### 2. Get Gmail OAuth credentials (one-time)
+---
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → Create project → Enable **Gmail API**
-2. Create **OAuth 2.0 Client ID** (type: Desktop) → download as `scripts/credentials.json`
-3. Run the helper to get your refresh token:
-   ```bash
-   pip install -r requirements.txt
-   python scripts/get_gmail_token.py
-   ```
-4. Copy the printed `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`
+## Local Development
 
-### 3. Set up environment
+### Prerequisites
+
+- Node.js 18+
+- Python 3.11+
+
+### 1. Clone and install
 
 ```bash
-cp .env.example .env
-# Fill in all 5 values in .env
+git clone https://github.com/omerElezra/TradeOpsJournal.git
+cd TradeOpsJournal/frontend
+npm install
 ```
 
-### 4. Test ingestion locally
+### 2. Set environment variables
 
 ```bash
+cp frontend/.env.example frontend/.env.local
+# Fill in SUPABASE_URL and SUPABASE_SERVICE_KEY
+```
+
+See the [Supabase setup](#supabase-setup) section below.
+
+### 3. Run the app
+
+```bash
+cd frontend
+npm run dev
+# → http://localhost:3000
+```
+
+### 4. Run ingestion locally (optional)
+
+```bash
+pip install -r requirements.txt
 python scripts/ingest.py
 ```
 
-### 5. Run the UI
+---
 
-```bash
-streamlit run app/streamlit_app.py
-```
+## Deploy to Vercel
+
+1. Push to GitHub.
+2. Go to [vercel.com](https://vercel.com) → **New Project** → import repo.
+3. Set **Root Directory** to `frontend`.
+4. Add environment variables:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_KEY`
+5. Deploy → you get a permanent URL like `https://tradeopsjournal.vercel.app`.
+
+**Phone:** open the URL in Safari → Share → **Add to Home Screen** to install as a PWA.
 
 ---
 
-## GitHub Actions (automated daily ingestion)
+## GitHub Actions — Automated Ingestion
+
+The workflow at `.github/workflows/daily_ingest.yml` runs Mon–Fri at 08:00 UTC.
 
 Add these secrets to your GitHub repo (`Settings → Secrets → Actions`):
 
@@ -113,10 +105,43 @@ Add these secrets to your GitHub repo (`Settings → Secrets → Actions`):
 | `SUPABASE_URL` | Supabase → Settings → API |
 | `SUPABASE_SERVICE_KEY` | Supabase → Settings → API (service_role) |
 
-The workflow runs Mon–Fri at 08:00 UTC. Trigger it manually anytime via **Actions → Daily IBKR Trade Ingestion → Run workflow**.
+Trigger manually at any time via **Actions → Daily IBKR Trade Ingestion → Run workflow**.
 
 ---
 
-## Deploy UI (optional)
+## Supabase Setup
 
-Push this repo to GitHub, then connect it to [Streamlit Community Cloud](https://streamlit.io/cloud). Add your `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in the Streamlit secrets dashboard.
+Run these migrations in the Supabase SQL editor:
+
+```bash
+# Apply via script (uses SUPABASE_URL + SUPABASE_ACCESS_TOKEN env vars)
+python scripts/run_migration.py scripts/migrations/001_trade_journal.sql
+python scripts/run_migration.py scripts/migrations/002_journal_risk_fields.sql
+```
+
+Or paste the SQL files directly in the Supabase dashboard. See [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) for the full schema.
+
+---
+
+## Gmail OAuth Setup (one-time)
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) → create project → enable **Gmail API**.
+2. Create **OAuth 2.0 Client ID** (type: Desktop) → download as `scripts/credentials.json`.
+3. Run the helper:
+   ```bash
+   python scripts/get_gmail_token.py
+   ```
+4. Copy the printed `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` into your `.env`.
+
+---
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, data flow, component responsibilities |
+| [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | What is implemented, what is not, known gaps |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Supabase schema — all tables and columns |
+| [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Product requirements |
+| [`docs/AI_COACHING_VISION.md`](docs/AI_COACHING_VISION.md) | Future AI coach concept |
+| [`archive/`](archive/) | Superseded code: Streamlit app, FastAPI backend, Docker files |
