@@ -2,12 +2,21 @@
 
 import { cn } from "@/lib/utils";
 import { useRange } from "@/components/range-context";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import type { Range } from "@/types";
 
 const RANGES: Range[] = ["7d", "30d", "90d", "ytd", "all"];
 
 export function Topbar() {
   const { range, setRange } = useRange();
+  const router = useRouter();
+  const supabase = createClient();
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur">
@@ -34,7 +43,12 @@ export function Topbar() {
             </button>
           ))}
         </div>
-        <div className="h-7 w-7 rounded-full bg-secondary" aria-label="Account" />
+        <button
+          onClick={signOut}
+          className="h-7 w-7 rounded-full bg-secondary text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="Sign out"
+          title="Sign out"
+        />
       </div>
     </header>
   );

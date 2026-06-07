@@ -2,196 +2,112 @@
 
 ## Overview
 
-TradeOpsJournal currently has three main parts:
+TradeOpsJournal is a single-user private trading journal. There is no separate backend service — the Next.js app handles both the UI and the server-side API.
 
-1. **Ingestion pipeline** — retrieves IBKR CSV files from Gmail and writes normalized records to Supabase.
-2. **Database** — Supabase stores stock executions and cash/FX transactions.
-3. **Dashboard** — Streamlit reads Supabase data and presents analytics.
-
-The future target architecture adds a product backend, a richer web application, manual journaling, and an AI coaching layer.
-
-## Current Architecture Diagram
-
-```mermaid
-flowchart LR
-    IBKR[IBKR Activity Flex CSV] --> Gmail[Gmail Inbox]
-    Gmail --> GHA[GitHub Actions Cron]
-    GHA --> Ingest[scripts/ingest.py]
-    Ingest --> Parser[IBKR CSV Parser]
-    Parser --> Trades[trades table]
-    Parser --> Cash[cash_transactions table]
-    Trades --> Supabase[(Supabase)]
-    Cash --> Supabase
-    Supabase --> Streamlit[Streamlit Dashboard]
-    Streamlit --> User[Trader]
+```
+IBKR CSV → Gmail → GitHub Actions → scripts/ingest.py → Supabase
+                                                              │
+                                              Next.js (Vercel)
+                                              /api/v1/* route handlers
+                                              lib/domain/ (server-only TS)
+                                                              │
+                                              React UI (browser / PWA)
 ```
 
-## Current Runtime Components
+## Components
 
-### Gmail Integration
+### Ingestion pipeline
 
-- Uses Gmail API readonly scope.
-- Authenticates with OAuth2 refresh token.
-- Searches for IBKR Activity Flex emails.
-- Downloads CSV attachments from matching messages.
+**File:** `scripts/ingest.py`
 
-### Ingestion Script
+Runs daily via GitHub Actions (Mon–Fri 08:00 UTC). Also runnable locally.
 
-File: `scripts/ingest.py`
+- Authenticates to Gmail via OAuth2 refresh token.
+- Searches for IBKR Activity Flex CSV emails.
+- Downloads and parses STK (stock) and CASH (FX/cash) execution rows.
+- Deduplicates using `trade_id` / `transaction_id`.
+- Upserts records into Supabase (`trades`, `cash_transactions`).
 
-Responsibilities:
+### Supabase database
 
-- Build Gmail client.
-- Find matching IBKR emails.
-- Download CSV attachments.
-- Parse stock and cash rows.
-- Transform rows into Supabase-ready records.
-- Deduplicate using `trade_id` and `transaction_id`.
-- Upsert data into Supabase.
-- Print run summary.
+Stores all raw data. Three tables are used by the app:
 
-### Supabase
+| Table | Contents |
+|---|---|
+| `trades` | Individual stock execution fills from IBKR |
+| `cash_transactions` | Cash and FX execution rows from IBKR |
+| `trade_journal` | User-written journal notes per trade group |
 
-Current tables expected by code:
+See [`DATA_MODEL.md`](DATA_MODEL.md) for full schema.
 
-- `trades`
-- `cash_transactions`
+### Next.js application (`frontend/`)
 
-Supabase is used as the operational database. The current code uses the service-role key for both ingestion and Streamlit data access.
+Deployed to Vercel. No Docker, no separate backend.
 
-### Streamlit UI
+**API route handlers** (`frontend/app/api/v1/`):
 
-File: `app/streamlit_app.py`
+| Route | Purpose |
+|---|---|
+| `GET /api/v1/metrics/summary` | KPI summary for a date range |
+| `GET /api/v1/metrics/equity-curve` | Equity curve data points |
+| `GET /api/v1/trades` | Paginated grouped trade list |
+| `GET /api/v1/trades/:id` | Single trade detail with executions |
+| `GET /api/v1/executions` | Raw execution fills (paginated) |
+| `GET /api/v1/cash` | Cash transactions (paginated) |
+| `GET /api/v1/cash/summary` | Cash summary metrics |
+| `POST /api/v1/journal` | Upsert journal entry for a trade |
+| `GET /api/v1/insights` | AI insights (stub — returns empty for now) |
 
-Responsibilities:
+**Server-only domain logic** (`frontend/lib/domain/`):
 
-- Load trade and cash data from Supabase.
-- Apply date filters.
-- Compute metrics and visual summaries.
-- Group executions into full trades.
-- Render overview, full trade, execution, and cash transaction tabs.
+| Module | Purpose |
+|---|---|
+| `grouping.ts` | FIFO round-trip trade grouping from raw executions |
+| `metrics.ts` | Win rate, profit factor, ROI, equity curve, max drawdown, etc. |
+| `ranges.ts` | Date range resolution (7d / 30d / 90d / ytd / all) |
+| `models.ts` | Internal TypeScript types for domain objects |
 
-## Current Data Flow
+All `lib/domain/` files are marked `import "server-only"` — they never run in the browser.
 
-```mermaid
-sequenceDiagram
-    participant GH as GitHub Actions / Local Run
-    participant Gmail as Gmail API
-    participant Ingest as ingest.py
-    participant DB as Supabase
-    participant UI as Streamlit
-    participant Trader as Trader
+**Supabase client** (`frontend/lib/supabase/server.ts`):
 
-    GH->>Ingest: Start daily or manual ingestion
-    Ingest->>Gmail: Search recent IBKR emails
-    Gmail-->>Ingest: Message IDs
-    Ingest->>Gmail: Download CSV attachments
-    Gmail-->>Ingest: CSV bytes
-    Ingest->>Ingest: Parse STK and CASH executions
-    Ingest->>DB: Upsert trades and cash transactions
-    Trader->>UI: Open dashboard
-    UI->>DB: Query trades and cash transactions
-    DB-->>UI: Records
-    UI-->>Trader: Metrics, charts, trade summaries
+Uses the service role key, server-side only. Never exposed to the browser.
+
+**React UI** (`frontend/components/`, `frontend/app/(dashboard)/`):
+
+Client-side display only. Uses TanStack Query to fetch from the `/api/v1/*` routes.
+
+## Data Flow
+
+```
+Browser (React)
+  │  TanStack Query → GET /api/v1/metrics/summary
+  ▼
+Next.js Route Handler (server)
+  │  resolveRange()
+  │  loadGroups(start, end)
+  │    ├── fetchExecutions() → Supabase trades table
+  │    └── fetchJournalMap() → Supabase trade_journal table
+  │  groupExecutions() → FIFO grouping
+  │  calculateMetrics() → KPI numbers
+  └→ NextResponse.json(summary)
+  ▼
+Browser renders KPI cards
 ```
 
-## Target Future Architecture
+## Deployment
 
-The target system should support a full application and web application, not only a Streamlit dashboard.
+| Layer | Service | Cost |
+|---|---|---|
+| Web app | Vercel Hobby | Free |
+| Database + Auth | Supabase Free | Free |
+| Ingestion cron | GitHub Actions | Free |
 
-```mermaid
-flowchart TB
-    subgraph DataSources[Data Sources]
-        IBKR[IBKR CSV / Statements]
-        Manual[Manual Journal Entries]
-        Market[Market Context Data]
-        Screenshots[Charts / Screenshots]
-    end
+No VPS, no Docker, no backend hosting needed.
 
-    subgraph Backend[Application Backend]
-        API[Backend API]
-        Auth[Authentication]
-        Ingestion[Ingestion Workers]
-        Analytics[Trade Analytics Engine]
-        Coach[AI Coaching Service]
-        Jobs[Scheduled Jobs]
-    end
+## What does NOT exist yet
 
-    subgraph Storage[Storage]
-        DB[(Supabase / Postgres)]
-        Files[(Object Storage)]
-        Vectors[(Vector Store / Embeddings)]
-    end
-
-    subgraph Frontend[Applications]
-        Web[Web App]
-        Admin[Admin / Debug Views]
-    end
-
-    IBKR --> Ingestion
-    Manual --> Web
-    Screenshots --> Files
-    Market --> Analytics
-    Web --> API
-    API --> Auth
-    API --> DB
-    API --> Files
-    Ingestion --> DB
-    Analytics --> DB
-    Coach --> DB
-    Coach --> Vectors
-    Coach --> API
-    Jobs --> Ingestion
-    Jobs --> Analytics
-    Web --> Coach
-```
-
-## Target Core Capabilities
-
-### Trading Journal Foundation
-
-- Execution ingestion from IBKR.
-- Manual trade plans and post-trade reviews.
-- Tags for strategy, setup, market condition, mistake type, and emotion.
-- Screenshots and evidence attached to trades.
-- Trade lifecycle: planned → opened → managed → closed → reviewed.
-
-### Analytics Engine
-
-- P&L and win-rate metrics.
-- Risk/reward metrics.
-- Setup-level performance.
-- Mistake-level performance.
-- Time-of-day and holding-time analysis.
-- Discipline metrics, such as whether the trader followed the plan.
-
-### AI Coaching Layer
-
-- Analyze trades and journal entries.
-- Detect repeated patterns and mistakes.
-- Ask targeted questions when context is missing.
-- Produce actionable improvement recommendations.
-- Track whether recommendations are followed over time.
-
-## Security Architecture Notes
-
-- Gmail refresh tokens and Supabase service-role keys must remain server-side only.
-- A browser-based web app must use user authentication and row-level security, not service-role access.
-- AI prompts must avoid exposing secrets and should minimize sensitive account data.
-- Trade data is personal financial data and should be treated as private by default.
-
-## Recommended Next Architecture Step
-
-Before building the future AI coach, split the current code into clean layers:
-
-```text
-tradeopsjournal/
-  ingestion/
-  db/
-  analytics/
-  ui/
-  ai/
-  tests/
-```
-
-This will make the future backend and web app easier to build without rewriting the current functionality.
+- Authentication (Supabase Auth / login screen). Currently anyone with the URL can read the app. Protect by keeping the Vercel deployment URL private or adding Vercel password protection.
+- AI insights backend. The `/api/v1/insights` route returns an empty array placeholder.
+- Mobile push notifications.
+- Chart library for equity curve visualization (Recharts not yet installed — the `EquityCurveCard` component renders a placeholder).
