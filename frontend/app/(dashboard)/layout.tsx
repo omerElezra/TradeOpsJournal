@@ -2,6 +2,9 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { RangeProvider } from "@/components/range-context";
 
+// All dashboard pages require live session data — never statically generate.
+export const dynamic = "force-dynamic";
+
 export default function DashboardLayout({
   children,
 }: {
