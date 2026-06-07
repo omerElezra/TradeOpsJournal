@@ -189,3 +189,45 @@ export interface CashQuery {
   dir?: "asc" | "desc";
   symbol?: string;
 }
+
+// ─── Performance Report ───────────────────────────────────────────────────────
+
+export interface HoldingTimeStats {
+  avgMinutes: number;
+  display: string;
+  tradeCount: number;
+}
+
+export interface PerformanceReport {
+  filter: { setup?: string; side?: "LONG" | "SHORT" };
+  tradeCount: number;
+  winCount: number;
+  lossCount: number;
+  breakevenCount: number;
+  /** (1) Win Rate % — benchmark > 45% */
+  winRate: number;
+  /** (2) Profit Factor — benchmark > 1.5 */
+  profitFactor: number;
+  /** (3) System Expectancy $ per trade — benchmark > 0 */
+  expectancy: number;
+  /** (4) Avg Win / |Avg Loss| ratio — benchmark > 2.0 */
+  winLossRatio: number;
+  /** (5) Cumulative R-Value — benchmark: growing positive */
+  cumulativeR: number;
+  rValueCount: number;
+  /** (6) Max Drawdown % peak-to-trough — benchmark < 15–20% */
+  maxDrawdownPct: number;
+  /** (7) Avg holding time split by trade outcome */
+  holdingTime: {
+    winners: HoldingTimeStats;
+    losers: HoldingTimeStats;
+    bias: "healthy" | "warning" | "insufficient_data";
+  };
+  raw: {
+    grossProfit: number;
+    grossLoss: number;
+    avgWin: number;
+    avgLoss: number;
+    netPnl: number;
+  };
+}
