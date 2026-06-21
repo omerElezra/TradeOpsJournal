@@ -255,3 +255,35 @@ export interface PerformanceReport {
     netPnl: number;
   };
 }
+
+// ─── Analytics (charts) ───────────────────────────────────────────────────────
+
+export interface AnalyticsTrade {
+  t: string;
+  netPnl: number;
+  result: TradeResult;
+  symbol: string;
+}
+
+export interface SymbolPerformance {
+  symbol: string;
+  netPnl: number;
+  wins: number;
+  losses: number;
+  tradeCount: number;
+  returnPct: number;
+}
+
+export interface MonthlyPerformance {
+  month: string;
+  netPnl: number;
+  wins: number;
+  losses: number;
+  tradeCount: number;
+}
+
+export interface AnalyticsData {
+  pnlPerTrade: AnalyticsTrade[];
+  bySymbol: SymbolPerformance[];
+  byMonth: MonthlyPerformance[];
+}

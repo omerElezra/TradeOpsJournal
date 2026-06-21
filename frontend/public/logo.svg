@@ -1,0 +1,61 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Diagonal clip: upper-right triangle → green border (top + right edges) -->
+    <clipPath id="cp-g">
+      <polygon points="0,0 512,0 512,512"/>
+    </clipPath>
+    <!-- Diagonal clip: lower-left triangle → red border (bottom + left edges) -->
+    <clipPath id="cp-r">
+      <polygon points="0,0 512,512 0,512"/>
+    </clipPath>
+    <!-- Arrowhead marker (absolute user-space units) -->
+    <marker id="arr" markerWidth="38" markerHeight="28"
+            refX="34" refY="14" orient="auto"
+            markerUnits="userSpaceOnUse">
+      <polygon points="0,0 34,14 0,28" fill="#3db87a"/>
+    </marker>
+  </defs>
+
+  <!-- Dark background -->
+  <rect width="512" height="512" rx="80" fill="#0d0d10"/>
+
+  <!-- Frame border — green on top+right (diagonal clip) -->
+  <rect x="72" y="72" width="368" height="368" rx="10"
+        fill="none" stroke="#3db87a" stroke-width="18"
+        clip-path="url(#cp-g)"/>
+  <!-- Frame border — red on bottom+left (diagonal clip) -->
+  <rect x="72" y="72" width="368" height="368" rx="10"
+        fill="none" stroke="#d4687a" stroke-width="18"
+        clip-path="url(#cp-r)"/>
+
+  <!-- Candle 1 — Green bull (leftmost, short) -->
+  <line x1="110" y1="237" x2="110" y2="345" stroke="#3db87a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="96"  y="257" width="28" height="65"  rx="3" fill="#3db87a"/>
+
+  <!-- Candle 2 — Green bull (tall) -->
+  <line x1="165" y1="177" x2="165" y2="348" stroke="#3db87a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="151" y="197" width="28" height="118" rx="3" fill="#3db87a"/>
+
+  <!-- Candle 3 — Red bear -->
+  <line x1="222" y1="272" x2="222" y2="402" stroke="#d4687a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="208" y="292" width="28" height="82"  rx="3" fill="#d4687a"/>
+
+  <!-- Candle 4 — Red bear (deepest dip) -->
+  <line x1="278" y1="302" x2="278" y2="422" stroke="#d4687a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="264" y="322" width="28" height="80"  rx="3" fill="#d4687a"/>
+
+  <!-- Candle 5 — Green bull -->
+  <line x1="334" y1="218" x2="334" y2="385" stroke="#3db87a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="320" y="238" width="28" height="112" rx="3" fill="#3db87a"/>
+
+  <!-- Candle 6 — Green bull (tallest, rightmost) -->
+  <line x1="396" y1="90"  x2="396" y2="302" stroke="#3db87a" stroke-width="5" stroke-linecap="round"/>
+  <rect x="382" y="108" width="28" height="160" rx="3" fill="#3db87a"/>
+
+  <!-- Trend arrow — starts low-left, dips mid, surges upper-right through the frame border -->
+  <polyline
+    points="88,354 165,207 260,282 440,52"
+    fill="none" stroke="#3db87a" stroke-width="13"
+    stroke-linejoin="round" stroke-linecap="round"
+    marker-end="url(#arr)"/>
+</svg>

@@ -12,6 +12,7 @@ import {
   Receipt,
   Banknote,
 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -30,10 +31,8 @@ export function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-card md:flex">
       <div className="flex h-14 items-center gap-2 border-b border-border px-5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <CandlestickChart className="h-4 w-4" />
-        </div>
-        <span className="text-sm font-semibold tracking-tight">TradeOps</span>
+        <img src="/logo.svg" alt="TradeOps" className="h-7 w-7 rounded-md" />
+        <span className="text-sm font-semibold tracking-tight">TradeOps Journal</span>
       </div>
 
       <nav className="flex-1 space-y-1 p-3">

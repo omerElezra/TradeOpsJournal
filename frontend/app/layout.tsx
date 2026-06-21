@@ -12,6 +12,10 @@ export const metadata: Metadata = {
   title: "TradeOps Journal",
   description: "Personal trading journal — analytics & AI coaching",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({
