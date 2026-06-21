@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     range: { from: start.toISOString(), to: end.toISOString() },
-    totalTrades: m.totalTrades(groups),
+    totalTrades: groups.length,
     openTrades: m.openTradesCount(groups),
     closedTrades: m.totalTrades(groups),
     wins: closed.filter(g => g.result === "WIN").length,
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
     expectancy: m.expectancy(groups),
     maxDrawdown: m.maxDrawdown(groups),
     totalCommission: r(closed.reduce((s, g) => s + g.commission, 0), 2),
+    realizedPnlGross: r(closed.reduce((s, g) => s + g.realizedPnl, 0), 2),
     bestTrade: m.bestTrade(groups),
     worstTrade: m.worstTrade(groups),
     totalTradeVolume: m.totalVolume(groups),

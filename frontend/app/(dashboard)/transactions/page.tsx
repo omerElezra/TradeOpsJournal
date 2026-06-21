@@ -22,16 +22,47 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
-import { Search } from "lucide-react";
-import type { RawExecutionRow } from "@/types";
+import { Download, Search } from "lucide-react";
+import { api } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
+import type { RawExecutionRow, ExecutionQuery } from "@/types";
+
+const CSV_COLUMNS = [
+  "execTime", "symbol", "action", "quantity",
+  "price", "proceeds", "commission", "realizedPnl", "currency",
+];
+
+async function fetchAllExecutions(params: ExecutionQuery): Promise<RawExecutionRow[]> {
+  const all: RawExecutionRow[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await api.getExecutions({ ...params, cursor, limit: 200 });
+    all.push(...page.data);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return all;
+}
 
 const ACTIONS = ["ALL", "BUY", "SELL"] as const;
 
-function StatBadge({ label, value }: { label: string; value: string | number }) {
+function StatBadge({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: string | number;
+  description?: string;
+}) {
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-0.5 text-sm font-semibold tabular">{value}</p>
+      {description && (
+        <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground/60">
+          {description}
+        </p>
+      )}
     </div>
   );
 }
@@ -45,6 +76,8 @@ export default function TransactionsPage() {
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [total, setTotal] = React.useState(0);
   const isLoadMore = React.useRef(false);
+  const [exporting, setExporting] = React.useState(false);
+  const [loadingAll, setLoadingAll] = React.useState(false);
 
   const { data, isLoading, isFetching } = useExecutions({
     range,
@@ -96,19 +129,40 @@ export default function TransactionsPage() {
             </div>
           ) : summary ? (
             <div className="flex flex-wrap gap-3">
-              <StatBadge label="Imported Rows" value={summary.importedRows} />
-              <StatBadge label="Trade Rows" value={summary.tradeRows} />
-              <StatBadge label="Cash Rows" value={summary.cashRows} />
-              <StatBadge label="Deposit Rows" value={summary.depositRows} />
-              <StatBadge label="Sweep Rows" value={summary.sweepRows} />
-              <StatBadge label="Fee / Commission Rows" value={summary.commissionRows} />
+              <StatBadge
+                label="Imported Rows"
+                value={summary.importedRows}
+                description="All rows across trades + cash tables"
+              />
+              <StatBadge
+                label="Trade Rows"
+                value={summary.tradeRows}
+                description="Raw BUY/SELL execution rows"
+              />
+              <StatBadge
+                label="Cash Rows"
+                value={summary.cashRows}
+                description="Deposit and sweep rows combined"
+              />
+              <StatBadge
+                label="Deposit Rows"
+                value={summary.depositRows}
+                description="qty > 50 and USD.ILS pair"
+              />
+              <StatBadge
+                label="Sweep Rows"
+                value={summary.sweepRows}
+                description="Internal FX movements"
+              />
+              <StatBadge
+                label="Fee / Commission Rows"
+                value={summary.commissionRows}
+                description="Cash rows where commission ≠ 0"
+              />
               <StatBadge
                 label="Last Import Date"
-                value={
-                  summary.lastImportDate
-                    ? formatDateTime(summary.lastImportDate)
-                    : "—"
-                }
+                value={summary.lastImportDate ? formatDateTime(summary.lastImportDate) : "—"}
+                description="Most recent row across all tables"
               />
             </div>
           ) : null}
@@ -150,6 +204,32 @@ export default function TransactionsPage() {
                 </button>
               ))}
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              className="gap-1.5"
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const rows = await fetchAllExecutions({
+                    range,
+                    symbol: symbol || undefined,
+                    action: action === "ALL" ? undefined : action,
+                  });
+                  downloadCsv(
+                    `transactions-${range}-${new Date().toISOString().slice(0, 10)}.csv`,
+                    rows,
+                    CSV_COLUMNS,
+                  );
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? "Exporting…" : "Export CSV"}
+            </Button>
           </div>
         </CardHeader>
 
@@ -244,19 +324,45 @@ export default function TransactionsPage() {
             <span className="text-xs text-muted-foreground">
               {total > 0 ? `${allRows.length} of ${total} executions` : ""}
             </span>
-            {nextCursor && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isFetching}
-                onClick={() => {
-                  isLoadMore.current = true;
-                  setCursor(nextCursor);
-                }}
-              >
-                {isFetching ? "Loading…" : "Load more"}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {nextCursor && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={async () => {
+                      setLoadingAll(true);
+                      try {
+                        const rows = await fetchAllExecutions({
+                          range,
+                          symbol: symbol || undefined,
+                          action: action === "ALL" ? undefined : action,
+                        });
+                        setAllRows(rows);
+                        setNextCursor(null);
+                        setTotal(rows.length);
+                      } finally {
+                        setLoadingAll(false);
+                      }
+                    }}
+                  >
+                    {loadingAll ? "Loading…" : "Load all"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={() => {
+                      isLoadMore.current = true;
+                      setCursor(nextCursor);
+                    }}
+                  >
+                    {isFetching ? "Loading…" : "Load more"}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

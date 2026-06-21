@@ -30,6 +30,7 @@ export interface MetricsSummary {
   profitFactor: number;
   netRoi: number;
   netPnl: number;
+  realizedPnlGross: number;
   grossProfit: number;
   grossLoss: number;
   avgWin: number;

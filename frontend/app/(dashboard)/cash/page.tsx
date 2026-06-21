@@ -22,10 +22,28 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search } from "lucide-react";
-import type { CashTransaction } from "@/types";
+import { Download, Search } from "lucide-react";
+import { api } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
+import type { CashTransaction, CashQuery } from "@/types";
 
-function movementType(row: CashTransaction): { label: string; kind: "deposit" | "sweep" | "withdrawal" } {
+const CSV_COLUMNS = [
+  "execTime", "txnType", "symbol", "action",
+  "quantity", "rate", "netCash", "commission", "currency",
+];
+
+async function fetchAllCash(params: CashQuery): Promise<CashTransaction[]> {
+  const all: CashTransaction[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await api.getCash({ ...params, cursor, limit: 200 });
+    all.push(...page.data);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return all;
+}
+
+function movementType(row: CashTransaction): { label: string; kind: "deposit" | "sweep" } {
   if (row.txnType === "deposit") return { label: "Deposit", kind: "deposit" };
   return { label: "Sweep", kind: "sweep" };
 }
@@ -38,6 +56,8 @@ export default function CashPage() {
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [total, setTotal] = React.useState(0);
   const isLoadMore = React.useRef(false);
+  const [exporting, setExporting] = React.useState(false);
+  const [loadingAll, setLoadingAll] = React.useState(false);
 
   const { data, isLoading, isFetching } = useCash({
     range,
@@ -78,42 +98,49 @@ export default function CashPage() {
           <MetricCard
             label="Total Deposited USD"
             value={summary ? formatCurrency(summary.totalDepositedUsd) : "—"}
+            description="Sum of all deposit amounts"
             intent="positive"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Total Deposited ILS"
             value={summary ? formatNumber(summary.totalDepositedIls) + " ₪" : "—"}
+            description="Qty × Rate for USD.ILS deposits"
             intent="positive"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Total Withdrawn USD"
             value={summary ? formatCurrency(summary.totalWithdrawnUsd) : "—"}
+            description="Sum of USD withdrawals"
             intent={summary && summary.totalWithdrawnUsd > 0 ? "negative" : "neutral"}
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Total Withdrawn ILS"
             value={summary ? formatNumber(summary.totalWithdrawnIls) + " ₪" : "—"}
+            description="Sum of ILS withdrawals"
             intent={summary && summary.totalWithdrawnIls > 0 ? "negative" : "neutral"}
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Net Deposited USD"
             value={summary ? formatCurrency(summary.netDepositedUsd) : "—"}
+            description="Deposited − Withdrawn"
             intent={summary && summary.netDepositedUsd >= 0 ? "positive" : "negative"}
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Net Deposited ILS"
             value={summary ? formatNumber(summary.netDepositedIls) + " ₪" : "—"}
+            description="Deposited − Withdrawn in ILS"
             intent={summary && summary.netDepositedIls >= 0 ? "positive" : "negative"}
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Cash / FX Commission Paid"
             value={summary ? formatCurrency(summary.cashFxCommissionPaid) : "—"}
+            description="Sum |commission| on all cash rows"
             intent="negative"
             isLoading={summaryLoading}
           />
@@ -129,44 +156,42 @@ export default function CashPage() {
           <MetricCard
             label="Deposit Count"
             value={summary ? String(summary.depositCount) : "—"}
+            description="Number of deposit rows"
             intent="neutral"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Withdrawal Count"
             value={summary ? String(summary.withdrawalCount) : "—"}
+            description="Number of withdrawal rows"
             intent="neutral"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Sweep Count"
             value={summary ? String(summary.sweepCount) : "—"}
+            description="Internal FX movements, not deposits"
             intent="neutral"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Average Deposit USD"
             value={summary ? formatCurrency(summary.avgDepositUsd) : "—"}
+            description="Total Deposited / Deposit Count"
             intent="neutral"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="First Deposit Date"
-            value={
-              summary?.firstDepositDate
-                ? formatDateTime(summary.firstDepositDate)
-                : "—"
-            }
+            value={summary?.firstDepositDate ? formatDateTime(summary.firstDepositDate) : "—"}
+            description="Earliest deposit row"
             intent="neutral"
             isLoading={summaryLoading}
           />
           <MetricCard
             label="Last Deposit Date"
-            value={
-              summary?.lastDepositDate
-                ? formatDateTime(summary.lastDepositDate)
-                : "—"
-            }
+            value={summary?.lastDepositDate ? formatDateTime(summary.lastDepositDate) : "—"}
+            description="Most recent deposit row"
             intent="neutral"
             isLoading={summaryLoading}
           />
@@ -191,6 +216,24 @@ export default function CashPage() {
                 className="h-8 w-36 rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              className="gap-1.5"
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const rows = await fetchAllCash({ range, symbol: symbol || undefined });
+                  downloadCsv(`cash-${range}-${new Date().toISOString().slice(0, 10)}.csv`, rows, CSV_COLUMNS);
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? "Exporting…" : "Export CSV"}
+            </Button>
           </div>
         </CardHeader>
 
@@ -230,9 +273,6 @@ export default function CashPage() {
                   const amountIls =
                     isDeposit && rate != null ? row.quantity * rate : null;
 
-                  const flowKind: "Real Cash Flow" | "Internal Movement" =
-                    isDeposit ? "Real Cash Flow" : "Internal Movement";
-
                   return (
                     <TableRow
                       key={`${row.transactionId}-${i}`}
@@ -254,23 +294,21 @@ export default function CashPage() {
                         {amountUsd != null ? formatCurrency(amountUsd) : "—"}
                       </TableCell>
                       <TableCell className="tabular text-right">
-                        {amountIls != null
-                          ? formatNumber(amountIls) + " ₪"
-                          : "—"}
+                        {amountIls != null ? formatNumber(amountIls) + " ₪" : "—"}
                       </TableCell>
                       <TableCell className="tabular text-right">
                         {rate != null ? formatNumber(rate, 4) : "—"}
                       </TableCell>
                       <TableCell className="tabular text-right text-muted-foreground">
                         {row.commission != null && row.commission !== 0
-                          ? formatNumber(row.commission)
+                          ? formatCurrency(row.commission)
                           : "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {row.currency ?? "—"}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {flowKind}
+                        {isDeposit ? "Real Cash Flow" : "Internal Movement"}
                       </TableCell>
                     </TableRow>
                   );
@@ -292,19 +330,41 @@ export default function CashPage() {
             <span className="text-xs text-muted-foreground">
               {total > 0 ? `${allRows.length} of ${total} movements` : ""}
             </span>
-            {nextCursor && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isFetching}
-                onClick={() => {
-                  isLoadMore.current = true;
-                  setCursor(nextCursor);
-                }}
-              >
-                {isFetching ? "Loading…" : "Load more"}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {nextCursor && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={async () => {
+                      setLoadingAll(true);
+                      try {
+                        const rows = await fetchAllCash({ range, symbol: symbol || undefined });
+                        setAllRows(rows);
+                        setNextCursor(null);
+                        setTotal(rows.length);
+                      } finally {
+                        setLoadingAll(false);
+                      }
+                    }}
+                  >
+                    {loadingAll ? "Loading…" : "Load all"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={() => {
+                      isLoadMore.current = true;
+                      setCursor(nextCursor);
+                    }}
+                  >
+                    {isFetching ? "Loading…" : "Load more"}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

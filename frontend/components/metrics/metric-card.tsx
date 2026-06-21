@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 export interface MetricCardProps {
   label: string;
   value: string;
+  description?: string;
   delta?: number;
   deltaLabel?: string;
   intent?: "positive" | "negative" | "neutral";
@@ -15,6 +16,7 @@ export interface MetricCardProps {
 export function MetricCard({
   label,
   value,
+  description,
   delta,
   deltaLabel,
   intent = "neutral",
@@ -37,11 +39,18 @@ export function MetricCard({
         {isLoading ? (
           <Skeleton className="h-8 w-24" />
         ) : (
-          <div className="flex items-end justify-between">
-            <span className={cn("tabular text-2xl font-semibold", valueColor)}>
-              {value}
-            </span>
-            {delta !== undefined && <DeltaPill delta={delta} label={deltaLabel} />}
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-end justify-between">
+              <span className={cn("tabular text-2xl font-semibold", valueColor)}>
+                {value}
+              </span>
+              {delta !== undefined && <DeltaPill delta={delta} label={deltaLabel} />}
+            </div>
+            {description && (
+              <span className="text-[10px] leading-tight text-muted-foreground/60">
+                {description}
+              </span>
+            )}
           </div>
         )}
       </CardContent>

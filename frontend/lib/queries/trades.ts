@@ -120,11 +120,26 @@ export async function loadGroups(
   start: Date,
   end: Date,
 ): Promise<[GroupedTrade[], Map<string, Record<string, unknown>>]> {
+  // Fetch ALL executions up to end so trades that opened before the range
+  // start still group correctly (e.g. a trade opened 40d ago but closed 28d
+  // ago won't be seen as OPEN when the user selects a 30d range).
   const [execs, journal] = await Promise.all([
-    fetchExecutions(start, end),
+    fetchExecutions(new Date(0), end),
     fetchJournalMap(start, end),
   ]);
-  return [groupExecutions(execs), journal];
+
+  const allGroups = groupExecutions(execs);
+
+  // Keep only trades that were active during [start, end]:
+  //   - still open (position was open at some point up to end), OR
+  //   - closed and the exit falls within or after range start
+  const groups = allGroups.filter(
+    (g) =>
+      g.entryTime <= end &&
+      (g.status === "OPEN" || (g.exitTime !== null && g.exitTime >= start)),
+  );
+
+  return [groups, journal];
 }
 
 function toRawExecution(r: Record<string, unknown>): RawExecution {

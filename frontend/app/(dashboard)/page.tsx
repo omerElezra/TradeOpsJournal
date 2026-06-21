@@ -9,10 +9,11 @@ import { useRange } from "@/components/range-context";
 import {
   formatCurrency,
   formatNumber,
-  formatPercent,
   formatDateTime,
+  formatPercent,
   pnlIntent,
 } from "@/lib/format";
+
 
 export default function DashboardPage() {
   const { range } = useRange();
@@ -20,8 +21,11 @@ export default function DashboardPage() {
   const { data: cash, isLoading: cashLoading } = useCashSummary(range);
 
   const netPnlAfterFees =
-    metrics && cash
-      ? metrics.netPnl - cash.cashFxCommissionPaid
+    metrics && cash ? metrics.netPnl - cash.cashFxCommissionPaid : null;
+
+  const estimatedAccountValue =
+    cash && netPnlAfterFees != null
+      ? cash.netDepositedUsd + netPnlAfterFees
       : null;
 
   const totalCommissionPaid =
@@ -33,9 +37,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-lg font-semibold">Overview</h1>
-        <p className="text-sm text-muted-foreground">
-          Account and portfolio snapshot.
-        </p>
+        <p className="text-sm text-muted-foreground">Account and portfolio snapshot.</p>
       </div>
 
       {/* Account Snapshot */}
@@ -47,44 +49,42 @@ export default function DashboardPage() {
           <MetricCard
             label="Total Deposited USD"
             value={cash ? formatCurrency(cash.totalDepositedUsd) : "—"}
+            description="Sum of all deposit amounts"
             intent="neutral"
             isLoading={cashLoading}
           />
           <MetricCard
             label="Total Deposited ILS"
             value={cash ? formatNumber(cash.totalDepositedIls) + " ₪" : "—"}
+            description="Qty × Rate for USD.ILS deposits"
             intent="neutral"
             isLoading={cashLoading}
           />
+          {/* Only show Net Deposited when there are actual withdrawals */}
+          {(!cash || cash.totalWithdrawnUsd > 0) && (
+            <MetricCard
+              label="Net Deposited USD"
+              value={cash ? formatCurrency(cash.netDepositedUsd) : "—"}
+              description="Deposited − Withdrawn"
+              intent={cash && cash.netDepositedUsd >= 0 ? "positive" : "negative"}
+              isLoading={cashLoading}
+            />
+          )}
+          {(!cash || cash.totalWithdrawnIls > 0) && (
+            <MetricCard
+              label="Net Deposited ILS"
+              value={cash ? formatNumber(cash.netDepositedIls) + " ₪" : "—"}
+              description="Deposited − Withdrawn in ILS"
+              intent={cash && cash.netDepositedIls >= 0 ? "positive" : "negative"}
+              isLoading={cashLoading}
+            />
+          )}
           <MetricCard
-            label="Net Deposited USD"
-            value={cash ? formatCurrency(cash.netDepositedUsd) : "—"}
-            intent={cash && cash.netDepositedUsd >= 0 ? "positive" : "negative"}
-            isLoading={cashLoading}
-          />
-          <MetricCard
-            label="Net Deposited ILS"
-            value={cash ? formatNumber(cash.netDepositedIls) + " ₪" : "—"}
-            intent={cash && cash.netDepositedIls >= 0 ? "positive" : "negative"}
-            isLoading={cashLoading}
-          />
-          <MetricCard
-            label="Current Account Value"
-            value="N/A"
-            intent="neutral"
-            isLoading={false}
-          />
-          <MetricCard
-            label="Available Cash"
-            value="N/A"
-            intent="neutral"
-            isLoading={false}
-          />
-          <MetricCard
-            label="Open Positions Value"
-            value="N/A"
-            intent="neutral"
-            isLoading={false}
+            label="Est. Account Value"
+            value={estimatedAccountValue != null ? formatCurrency(estimatedAccountValue) : "—"}
+            description="Net Deposited + Net P&L (closed trades only, excl. open positions)"
+            intent={estimatedAccountValue != null ? pnlIntent(estimatedAccountValue) : "neutral"}
+            isLoading={cashLoading || metricsLoading}
           />
         </div>
       </div>
@@ -97,31 +97,29 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <MetricCard
             label="Realized P&L"
-            value={metrics ? formatCurrency(metrics.netPnl) : "—"}
-            intent={metrics ? pnlIntent(metrics.netPnl) : "neutral"}
+            value={metrics ? formatCurrency(metrics.realizedPnlGross) : "—"}
+            description="Gross P&L from closed trades, before commission"
+            intent={metrics ? pnlIntent(metrics.realizedPnlGross) : "neutral"}
             isLoading={metricsLoading}
-          />
-          <MetricCard
-            label="Unrealized P&L"
-            value="N/A"
-            intent="neutral"
-            isLoading={false}
           />
           <MetricCard
             label="Total Commission Paid"
             value={totalCommissionPaid != null ? formatCurrency(totalCommissionPaid) : "—"}
+            description="Trade commission + Cash/FX commission"
             intent="negative"
             isLoading={metricsLoading || cashLoading}
           />
           <MetricCard
             label="Net P&L After Fees"
             value={netPnlAfterFees != null ? formatCurrency(netPnlAfterFees) : "—"}
+            description="netPnl (after trade comm) − Cash/FX commission"
             intent={netPnlAfterFees != null ? pnlIntent(netPnlAfterFees) : "neutral"}
             isLoading={metricsLoading || cashLoading}
           />
           <MetricCard
             label="Net ROI"
             value={metrics ? formatPercent(metrics.netRoi) : "—"}
+            description="Net P&L / capital deployed in trades"
             delta={metrics?.deltas.netRoi}
             deltaLabel="vs prev period"
             intent={metrics && metrics.netRoi >= 0 ? "positive" : "negative"}
@@ -139,28 +137,28 @@ export default function DashboardPage() {
           <MetricCard
             label="Total Trades"
             value={metrics ? String(metrics.totalTrades) : "—"}
+            description="Open + Closed trades"
             intent="neutral"
             isLoading={metricsLoading}
           />
           <MetricCard
             label="Open Trades"
             value={metrics ? String(metrics.openTrades) : "—"}
+            description="Trades with no exit yet"
             intent="neutral"
             isLoading={metricsLoading}
           />
           <MetricCard
             label="Closed Trades"
             value={metrics ? String(metrics.closedTrades) : "—"}
+            description="Fully exited trades"
             intent="neutral"
             isLoading={metricsLoading}
           />
           <MetricCard
             label="Last Trade Date"
-            value={
-              metrics?.lastTradeDate
-                ? formatDateTime(metrics.lastTradeDate)
-                : "—"
-            }
+            value={metrics?.lastTradeDate ? formatDateTime(metrics.lastTradeDate) : "—"}
+            description="Most recent closed trade exit"
             intent="neutral"
             isLoading={metricsLoading}
           />
