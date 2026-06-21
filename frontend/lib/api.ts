@@ -1,4 +1,5 @@
 import type {
+  AnalyticsData,
   CashQuery,
   CashSummary,
   CashTransaction,
@@ -78,4 +79,7 @@ export const api = {
 
   getTransactionsSummary: () =>
     request<TransactionsSummary>(`/api/v1/transactions/summary`),
+
+  getAnalytics: (range: Range) =>
+    request<AnalyticsData>(`/api/v1/metrics/analytics${qs({ range })}`),
 };

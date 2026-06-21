@@ -57,9 +57,12 @@ function LoginForm() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-6 rounded-lg border border-border bg-card p-8">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">TradeOps Journal</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Sign in to continue</p>
+        <div className="flex flex-col items-center gap-3">
+          <img src="/logo.svg" alt="TradeOps" className="h-16 w-16 rounded-xl" />
+          <div className="text-center">
+            <h1 className="text-xl font-semibold tracking-tight">TradeOps Journal</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Sign in to continue</p>
+          </div>
         </div>
 
         {error && (
