@@ -13,6 +13,7 @@ import type {
   TradeGroup,
   TradeGroupDetail,
   TradeQuery,
+  TransactionsSummary,
 } from "@/types";
 
 // Empty BASE → all requests go to the same Next.js origin (relative URLs).
@@ -74,4 +75,7 @@ export const api = {
 
   getCashSummary: (range: Range) =>
     request<CashSummary>(`/api/v1/cash/summary${qs({ range })}`),
+
+  getTransactionsSummary: () =>
+    request<TransactionsSummary>(`/api/v1/transactions/summary`),
 };

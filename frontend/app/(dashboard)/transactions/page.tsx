@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRange } from "@/components/range-context";
 import { useExecutions } from "@/hooks/use-executions";
+import { useTransactionsSummary } from "@/hooks/use-transactions";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,10 +21,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatDateTime } from "@/lib/format";
 import { Search } from "lucide-react";
 import type { RawExecutionRow } from "@/types";
 
 const ACTIONS = ["ALL", "BUY", "SELL"] as const;
+
+function StatBadge({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold tabular">{value}</p>
+    </div>
+  );
+}
 
 export default function TransactionsPage() {
   const { range } = useRange();
@@ -42,6 +53,8 @@ export default function TransactionsPage() {
     action: action === "ALL" ? undefined : action,
     cursor: cursor || undefined,
   });
+
+  const { data: summary, isLoading: summaryLoading } = useTransactionsSummary();
 
   React.useEffect(() => {
     if (!data) return;
@@ -65,10 +78,44 @@ export default function TransactionsPage() {
       <div>
         <h1 className="text-lg font-semibold">Transactions</h1>
         <p className="text-sm text-muted-foreground">
-          Every raw execution fill from the trades table.
+          Raw imported data and classification health.
         </p>
       </div>
 
+      {/* Data Health Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Data Health</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {summaryLoading ? (
+            <div className="flex gap-3">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-24" />
+              ))}
+            </div>
+          ) : summary ? (
+            <div className="flex flex-wrap gap-3">
+              <StatBadge label="Imported Rows" value={summary.importedRows} />
+              <StatBadge label="Trade Rows" value={summary.tradeRows} />
+              <StatBadge label="Cash Rows" value={summary.cashRows} />
+              <StatBadge label="Deposit Rows" value={summary.depositRows} />
+              <StatBadge label="Sweep Rows" value={summary.sweepRows} />
+              <StatBadge label="Fee / Commission Rows" value={summary.commissionRows} />
+              <StatBadge
+                label="Last Import Date"
+                value={
+                  summary.lastImportDate
+                    ? formatDateTime(summary.lastImportDate)
+                    : "—"
+                }
+              />
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Raw Execution Log */}
       <Card>
         <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
           <CardTitle className="text-foreground">Execution Log</CardTitle>
@@ -119,13 +166,14 @@ export default function TransactionsPage() {
                 <TableHead>Commission</TableHead>
                 <TableHead>Realized P&L</TableHead>
                 <TableHead>Currency</TableHead>
+                <TableHead>Classification</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 9 }).map((_, j) => (
+                    {Array.from({ length: 10 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-16" />
                       </TableCell>
@@ -136,7 +184,7 @@ export default function TransactionsPage() {
                 allRows.map((row, i) => (
                   <TableRow key={`${row.tradeId}-${i}`}>
                     <TableCell className="tabular text-muted-foreground">
-                      {row.execTime}
+                      {formatDateTime(row.execTime)}
                     </TableCell>
                     <TableCell className="font-semibold">{row.symbol}</TableCell>
                     <TableCell>
@@ -169,13 +217,20 @@ export default function TransactionsPage() {
                     >
                       {row.realizedPnl ?? "—"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{row.currency}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.currency}
+                    </TableCell>
+                    <TableCell>
+                      <span className="rounded bg-accent px-1.5 py-0.5 text-xs text-muted-foreground">
+                        Trade
+                      </span>
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={9}
+                    colSpan={10}
                     className="h-24 text-center text-muted-foreground"
                   >
                     No executions in this range.

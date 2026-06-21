@@ -9,4 +9,5 @@ export const qk = {
   executions: (params: ExecutionQuery) => ["executions", params] as const,
   cash: (params: CashQuery) => ["cash", params] as const,
   cashSummary: (range: Range) => ["cashSummary", range] as const,
+  transactionsSummary: () => ["transactionsSummary"] as const,
 };

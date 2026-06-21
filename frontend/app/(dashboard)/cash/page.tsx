@@ -25,6 +25,11 @@ import {
 import { Search } from "lucide-react";
 import type { CashTransaction } from "@/types";
 
+function movementType(row: CashTransaction): { label: string; kind: "deposit" | "sweep" | "withdrawal" } {
+  if (row.txnType === "deposit") return { label: "Deposit", kind: "deposit" };
+  return { label: "Sweep", kind: "sweep" };
+}
+
 export default function CashPage() {
   const { range } = useRange();
   const [symbol, setSymbol] = React.useState("");
@@ -60,53 +65,118 @@ export default function CashPage() {
       <div>
         <h1 className="text-lg font-semibold">Cash &amp; FX</h1>
         <p className="text-sm text-muted-foreground">
-          FX conversions, deposits, and cash activity. Deposits are highlighted in blue.
+          Deposits, withdrawals, FX movements, sweeps, and cash-related commissions.
         </p>
       </div>
 
-      {/* ── KPI cards ── server-side aggregated across full range ── */}
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <MetricCard
-          label="Total Transactions"
-          value={summary ? String(summary.totalTransactions) : "—"}
-          intent="neutral"
-          isLoading={summaryLoading}
-        />
-        <MetricCard
-          label="Total Deposited (USD)"
-          value={summary ? formatCurrency(summary.totalDepositedUsd) : "—"}
-          intent="positive"
-          isLoading={summaryLoading}
-        />
-        <MetricCard
-          label="Net Cash"
-          value={summary ? formatNumber(summary.netCash) : "—"}
-          intent={summary && summary.netCash >= 0 ? "positive" : "negative"}
-          isLoading={summaryLoading}
-        />
-        <MetricCard
-          label="Inflows"
-          value={summary ? formatNumber(summary.totalInflows) : "—"}
-          intent="positive"
-          isLoading={summaryLoading}
-        />
-        <MetricCard
-          label="Outflows"
-          value={summary ? formatNumber(summary.totalOutflows) : "—"}
-          intent={summary && summary.totalOutflows < 0 ? "negative" : "neutral"}
-          isLoading={summaryLoading}
-        />
-        <MetricCard
-          label="Commission Paid"
-          value={summary ? formatNumber(summary.totalCommission) : "—"}
-          intent={summary && summary.totalCommission < 0 ? "negative" : "neutral"}
-          isLoading={summaryLoading}
-        />
-      </section>
+      {/* Primary Cash Cards */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Deposits &amp; Withdrawals
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <MetricCard
+            label="Total Deposited USD"
+            value={summary ? formatCurrency(summary.totalDepositedUsd) : "—"}
+            intent="positive"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Total Deposited ILS"
+            value={summary ? formatNumber(summary.totalDepositedIls) + " ₪" : "—"}
+            intent="positive"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Total Withdrawn USD"
+            value={summary ? formatCurrency(summary.totalWithdrawnUsd) : "—"}
+            intent={summary && summary.totalWithdrawnUsd > 0 ? "negative" : "neutral"}
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Total Withdrawn ILS"
+            value={summary ? formatNumber(summary.totalWithdrawnIls) + " ₪" : "—"}
+            intent={summary && summary.totalWithdrawnIls > 0 ? "negative" : "neutral"}
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Net Deposited USD"
+            value={summary ? formatCurrency(summary.netDepositedUsd) : "—"}
+            intent={summary && summary.netDepositedUsd >= 0 ? "positive" : "negative"}
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Net Deposited ILS"
+            value={summary ? formatNumber(summary.netDepositedIls) + " ₪" : "—"}
+            intent={summary && summary.netDepositedIls >= 0 ? "positive" : "negative"}
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Cash / FX Commission Paid"
+            value={summary ? formatCurrency(summary.cashFxCommissionPaid) : "—"}
+            intent="negative"
+            isLoading={summaryLoading}
+          />
+        </div>
+      </div>
 
+      {/* Secondary Cash Cards */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Activity
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <MetricCard
+            label="Deposit Count"
+            value={summary ? String(summary.depositCount) : "—"}
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Withdrawal Count"
+            value={summary ? String(summary.withdrawalCount) : "—"}
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Sweep Count"
+            value={summary ? String(summary.sweepCount) : "—"}
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Average Deposit USD"
+            value={summary ? formatCurrency(summary.avgDepositUsd) : "—"}
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="First Deposit Date"
+            value={
+              summary?.firstDepositDate
+                ? formatDateTime(summary.firstDepositDate)
+                : "—"
+            }
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            label="Last Deposit Date"
+            value={
+              summary?.lastDepositDate
+                ? formatDateTime(summary.lastDepositDate)
+                : "—"
+            }
+            intent="neutral"
+            isLoading={summaryLoading}
+          />
+        </div>
+      </div>
+
+      {/* Normalized Cash Movement Table */}
       <Card>
         <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
-          <CardTitle className="text-foreground">Cash Transactions</CardTitle>
+          <CardTitle className="text-foreground">Cash Movements</CardTitle>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -128,22 +198,23 @@ export default function CashPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Time</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Symbol / Pair</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Movement Type</TableHead>
+                <TableHead>Pair</TableHead>
                 <TableHead>Action</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Amount USD</TableHead>
+                <TableHead className="text-right">Amount ILS</TableHead>
                 <TableHead className="text-right">Rate</TableHead>
-                <TableHead className="text-right">Value</TableHead>
                 <TableHead className="text-right">Commission</TableHead>
                 <TableHead>Currency</TableHead>
+                <TableHead>Notes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 9 }).map((_, j) => (
+                    {Array.from({ length: 10 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-16" />
                       </TableCell>
@@ -152,7 +223,16 @@ export default function CashPage() {
                 ))
               ) : allRows.length ? (
                 allRows.map((row, i) => {
-                  const isDeposit = row.txnType === "deposit";
+                  const { label, kind } = movementType(row);
+                  const isDeposit = kind === "deposit";
+                  const amountUsd = isDeposit ? row.quantity : null;
+                  const rate = row.rate ?? null;
+                  const amountIls =
+                    isDeposit && rate != null ? row.quantity * rate : null;
+
+                  const flowKind: "Real Cash Flow" | "Internal Movement" =
+                    isDeposit ? "Real Cash Flow" : "Internal Movement";
+
                   return (
                     <TableRow
                       key={`${row.transactionId}-${i}`}
@@ -163,25 +243,23 @@ export default function CashPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={isDeposit ? "positive" : "neutral"}>
-                          {isDeposit ? "Deposit" : "Sweep"}
+                          {label}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-semibold">{row.symbol}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {row.action ?? "—"}
                       </TableCell>
-                      <TableCell className="tabular text-right">
-                        {formatNumber(row.quantity)}
+                      <TableCell className="tabular text-right font-medium text-positive">
+                        {amountUsd != null ? formatCurrency(amountUsd) : "—"}
                       </TableCell>
                       <TableCell className="tabular text-right">
-                        {row.rate != null ? formatNumber(row.rate, 4) : "—"}
+                        {amountIls != null
+                          ? formatNumber(amountIls) + " ₪"
+                          : "—"}
                       </TableCell>
-                      <TableCell
-                        className={`tabular text-right font-medium ${
-                          (row.netCash ?? 0) > 0 ? "text-positive" : "text-muted-foreground"
-                        }`}
-                      >
-                        {row.netCash != null ? formatNumber(row.netCash) : "—"}
+                      <TableCell className="tabular text-right">
+                        {rate != null ? formatNumber(rate, 4) : "—"}
                       </TableCell>
                       <TableCell className="tabular text-right text-muted-foreground">
                         {row.commission != null && row.commission !== 0
@@ -191,16 +269,19 @@ export default function CashPage() {
                       <TableCell className="text-muted-foreground">
                         {row.currency ?? "—"}
                       </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {flowKind}
+                      </TableCell>
                     </TableRow>
                   );
                 })
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={9}
+                    colSpan={10}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    No cash transactions in this range.
+                    No cash movements in this range.
                   </TableCell>
                 </TableRow>
               )}
@@ -209,7 +290,7 @@ export default function CashPage() {
 
           <div className="flex items-center justify-between pt-4">
             <span className="text-xs text-muted-foreground">
-              {total > 0 ? `${allRows.length} of ${total} transactions` : ""}
+              {total > 0 ? `${allRows.length} of ${total} movements` : ""}
             </span>
             {nextCursor && (
               <Button

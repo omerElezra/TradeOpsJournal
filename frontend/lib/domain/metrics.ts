@@ -64,6 +64,32 @@ export function totalTrades(trades: GroupedTrade[]) {
   return closed(trades).length;
 }
 
+export function openTradesCount(trades: GroupedTrade[]) {
+  return trades.filter(t => t.status === "OPEN").length;
+}
+
+export function bestTrade(trades: GroupedTrade[]) {
+  const c = closed(trades);
+  if (!c.length) return 0;
+  return r(Math.max(...c.map(t => t.netPnl)), 2);
+}
+
+export function worstTrade(trades: GroupedTrade[]) {
+  const c = closed(trades);
+  if (!c.length) return 0;
+  return r(Math.min(...c.map(t => t.netPnl)), 2);
+}
+
+export function totalVolume(trades: GroupedTrade[]) {
+  return r(closed(trades).reduce((s, t) => s + Math.abs(t.avgEntry * t.qty), 0), 2);
+}
+
+export function lastTradeDate(trades: GroupedTrade[]): Date | null {
+  const c = closed(trades).filter(t => t.exitTime !== null);
+  if (!c.length) return null;
+  return c.reduce((latest, t) => t.exitTime! > latest ? t.exitTime! : latest, c[0].exitTime!);
+}
+
 export function rMultiple(net: number, risk: number | null | undefined): number | null {
   if (risk == null || Math.abs(risk) < EPS) return null;
   return r(net / Math.abs(risk), 2);
