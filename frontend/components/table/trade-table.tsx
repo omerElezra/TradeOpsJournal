@@ -8,7 +8,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -28,9 +28,28 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { tradeColumns } from "@/components/table/columns";
 import { useTrades } from "@/hooks/use-trades";
 import { useRange } from "@/components/range-context";
-import type { TradeResult, TradeGroup } from "@/types";
+import { api } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
+import type { TradeResult, TradeGroup, TradeQuery } from "@/types";
 
 const RESULTS: (TradeResult | "ALL")[] = ["ALL", "WIN", "LOSS", "BREAKEVEN"];
+
+const CSV_COLUMNS = [
+  "symbol", "side", "status", "result",
+  "entryTime", "exitTime", "qty", "avgEntry", "avgExit",
+  "netPnl", "realizedPnl", "commission", "returnPct", "rMultiple", "holdingMinutes", "currency",
+];
+
+async function fetchAllTrades(params: TradeQuery): Promise<TradeGroup[]> {
+  const all: TradeGroup[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await api.getTrades({ ...params, cursor, limit: 200 });
+    all.push(...page.data);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return all;
+}
 
 export function TradeTable({
   variant = "full",
@@ -47,8 +66,9 @@ export function TradeTable({
   const [symbol, setSymbol] = React.useState("");
   const [result, setResult] = React.useState<TradeResult | "ALL">("ALL");
   const [cursor, setCursor] = React.useState<string | null>(null);
+  const [exporting, setExporting] = React.useState(false);
+  const [loadingAll, setLoadingAll] = React.useState(false);
 
-  // Accumulated rows for load-more (full variant)
   const [allTrades, setAllTrades] = React.useState<TradeGroup[]>([]);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [total, setTotal] = React.useState(0);
@@ -57,7 +77,7 @@ export function TradeTable({
   const sortKey = sorting[0]?.id ?? "entryTime";
   const sortDir: "asc" | "desc" = sorting[0]?.desc === false ? "asc" : "desc";
 
-  const { data, isLoading, isFetching } = useTrades({
+  const queryParams: TradeQuery = {
     range,
     limit: variant === "compact" ? 8 : pageSize,
     symbol: symbol || undefined,
@@ -65,9 +85,10 @@ export function TradeTable({
     sort: sortKey,
     dir: sortDir,
     cursor: cursor || undefined,
-  });
+  };
 
-  // Merge fetched page into accumulated list
+  const { data, isLoading, isFetching } = useTrades(queryParams);
+
   React.useEffect(() => {
     if (!data || variant !== "full") return;
     if (isLoadMore.current) {
@@ -87,15 +108,47 @@ export function TradeTable({
     columns: tradeColumns,
     state: { sorting },
     onSortingChange: (updater) => {
-      // Reset to first page whenever sort changes
       isLoadMore.current = false;
       setCursor(null);
       setSorting(updater);
     },
     getCoreRowModel: getCoreRowModel(),
-    // Server handles sorting — no getSortedRowModel needed
     manualSorting: true,
   });
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const rows = await fetchAllTrades({
+        range,
+        symbol: symbol || undefined,
+        result: result === "ALL" ? undefined : result,
+        sort: sortKey,
+        dir: sortDir,
+      });
+      downloadCsv(`trades-${range}-${new Date().toISOString().slice(0, 10)}.csv`, rows, CSV_COLUMNS);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleLoadAll() {
+    setLoadingAll(true);
+    try {
+      const rows = await fetchAllTrades({
+        range,
+        symbol: symbol || undefined,
+        result: result === "ALL" ? undefined : result,
+        sort: sortKey,
+        dir: sortDir,
+      });
+      setAllTrades(rows);
+      setNextCursor(null);
+      setTotal(rows.length);
+    } finally {
+      setLoadingAll(false);
+    }
+  }
 
   return (
     <Card>
@@ -135,6 +188,16 @@ export function TradeTable({
                 </button>
               ))}
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              onClick={handleExport}
+              className="gap-1.5"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? "Exporting…" : "Export CSV"}
+            </Button>
           </div>
         )}
       </CardHeader>
@@ -148,10 +211,7 @@ export function TradeTable({
                   <TableHead key={header.id}>
                     {header.isPlaceholder
                       ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext(),
-                        )}
+                      : flexRender(header.column.columnDef.header, header.getContext())}
                   </TableHead>
                 ))}
               </TableRow>
@@ -198,27 +258,36 @@ export function TradeTable({
         {variant === "full" && (
           <div className="flex items-center justify-between pt-4">
             <span className="text-xs text-muted-foreground">
-              {total > 0
-                ? `${allTrades.length} of ${total} trades`
-                : ""}
+              {total > 0 ? `${allTrades.length} of ${total} trades` : ""}
             </span>
-            {nextCursor && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isFetching}
-                onClick={() => {
-                  isLoadMore.current = true;
-                  setCursor(nextCursor);
-                }}
-              >
-                {isFetching ? "Loading…" : "Load more"}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {nextCursor && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={handleLoadAll}
+                  >
+                    {loadingAll ? "Loading…" : "Load all"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching || loadingAll}
+                    onClick={() => {
+                      isLoadMore.current = true;
+                      setCursor(nextCursor);
+                    }}
+                  >
+                    {isFetching ? "Loading…" : "Load more"}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
-

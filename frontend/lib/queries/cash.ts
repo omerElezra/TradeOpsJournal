@@ -45,6 +45,16 @@ export async function fetchCashPage(
   return [(data ?? []) as Record<string, unknown>[], count ?? 0];
 }
 
+function isDeposit(row: Record<string, unknown>): boolean {
+  const qty = Number(row.quantity ?? 0);
+  const sym = String(row.symbol ?? "").toUpperCase();
+  return qty > 50 && sym.includes(".ILS");
+}
+
+function isSweep(row: Record<string, unknown>): boolean {
+  return !isDeposit(row);
+}
+
 export async function fetchCashSummary(
   start: Date,
   end: Date,
@@ -52,32 +62,129 @@ export async function fetchCashSummary(
   const db = getSupabaseAdmin();
   const { data, error } = await db
     .from("cash_transactions")
-    .select("quantity, rate, net_cash, commission, symbol, currency")
+    .select("quantity, rate, net_cash, commission, symbol, currency, exec_time")
     .gte("exec_time", start.toISOString())
-    .lte("exec_time", end.toISOString());
+    .lte("exec_time", end.toISOString())
+    .order("exec_time", { ascending: true });
 
   if (error) throw new Error(`fetchCashSummary: ${error.message}`);
   const rows = (data ?? []) as Record<string, unknown>[];
 
-  let totalNet = 0, totalInflows = 0, totalOutflows = 0, totalCommission = 0, totalDepositedUsd = 0;
+  let totalDepositedUsd = 0;
+  let totalDepositedIls = 0;
+  let totalWithdrawnUsd = 0;
+  let totalWithdrawnIls = 0;
+  let cashFxCommission = 0;
+  let depositCount = 0;
+  let withdrawalCount = 0;
+  let sweepCount = 0;
+  let firstDepositDate: string | null = null;
+  let lastDepositDate: string | null = null;
+
   for (const row of rows) {
-    const nc = Number(row.net_cash ?? 0);
-    totalNet += nc;
-    if (nc > 0) totalInflows += nc; else totalOutflows += nc;
-    totalCommission += Number(row.commission ?? 0);
     const qty = Number(row.quantity ?? 0);
     const rate = Number(row.rate ?? 0);
-    if (qty > 50 && String(row.symbol ?? "").toUpperCase().includes(".ILS")) {
-      totalDepositedUsd += rate > 0 ? qty / rate : 0;
+    const commission = Number(row.commission ?? 0);
+    const execTime = String(row.exec_time ?? "");
+
+    cashFxCommission += commission;
+
+    if (isDeposit(row)) {
+      // qty = USD amount, rate = USD/ILS rate
+      const usd = Math.abs(qty);
+      const ils = Math.abs(qty * rate);
+      totalDepositedUsd += usd;
+      totalDepositedIls += ils;
+      depositCount++;
+      if (!firstDepositDate) firstDepositDate = execTime;
+      lastDepositDate = execTime;
+    } else if (isSweep(row)) {
+      sweepCount++;
+    }
+    // Withdrawals: no withdrawal rows currently observed; handle if qty < 0
+    if (qty < 0 && isDeposit(row)) {
+      totalWithdrawnUsd += Math.abs(qty);
+      totalWithdrawnIls += Math.abs(qty * rate);
+      withdrawalCount++;
     }
   }
 
+  const netDepositedUsd = totalDepositedUsd - totalWithdrawnUsd;
+  const netDepositedIls = totalDepositedIls - totalWithdrawnIls;
+  const avgDepositUsd = depositCount > 0 ? totalDepositedUsd / depositCount : 0;
+
   return {
-    totalTransactions: rows.length,
-    netCash: r(totalNet, 2),
-    totalInflows: r(totalInflows, 2),
-    totalOutflows: r(totalOutflows, 2),
-    totalCommission: r(totalCommission, 2),
     totalDepositedUsd: r(totalDepositedUsd, 2),
+    totalDepositedIls: r(totalDepositedIls, 2),
+    totalWithdrawnUsd: r(totalWithdrawnUsd, 2),
+    totalWithdrawnIls: r(totalWithdrawnIls, 2),
+    netDepositedUsd: r(netDepositedUsd, 2),
+    netDepositedIls: r(netDepositedIls, 2),
+    cashFxCommissionPaid: r(Math.abs(cashFxCommission), 2),
+    depositCount,
+    withdrawalCount,
+    sweepCount,
+    avgDepositUsd: r(avgDepositUsd, 2),
+    firstDepositDate: firstDepositDate || null,
+    lastDepositDate: lastDepositDate || null,
+  };
+}
+
+export async function fetchTransactionsSummary(
+  start: Date,
+  end: Date,
+): Promise<Record<string, unknown>> {
+  const db = getSupabaseAdmin();
+
+  const [tradesResult, cashResult] = await Promise.all([
+    db
+      .from("trades")
+      .select("commission, exec_time", { count: "exact" })
+      .gte("exec_time", start.toISOString())
+      .lte("exec_time", end.toISOString())
+      .order("exec_time", { ascending: false })
+      .limit(1),
+    db
+      .from("cash_transactions")
+      .select("quantity, symbol, commission, exec_time", { count: "exact" })
+      .gte("exec_time", start.toISOString())
+      .lte("exec_time", end.toISOString()),
+  ]);
+
+  if (tradesResult.error) throw new Error(`fetchTransactionsSummary trades: ${tradesResult.error.message}`);
+  if (cashResult.error) throw new Error(`fetchTransactionsSummary cash: ${cashResult.error.message}`);
+
+  const tradeCount = tradesResult.count ?? 0;
+  const cashRows = (cashResult.data ?? []) as Record<string, unknown>[];
+  const cashCount = cashResult.count ?? 0;
+
+  let depositRows = 0;
+  let sweepRows = 0;
+  let cashCommissionRows = 0;
+  let lastCashDate: string | null = null;
+
+  for (const row of cashRows) {
+    if (isDeposit(row)) depositRows++; else sweepRows++;
+    if (Number(row.commission ?? 0) !== 0) cashCommissionRows++;
+    const t = String(row.exec_time ?? "");
+    if (t && (!lastCashDate || t > lastCashDate)) lastCashDate = t;
+  }
+
+  const lastTradeDate = tradesResult.data?.[0]
+    ? String(tradesResult.data[0].exec_time ?? "")
+    : null;
+  const lastImportDate = [lastTradeDate, lastCashDate]
+    .filter(Boolean)
+    .sort()
+    .pop() ?? null;
+
+  return {
+    importedRows: tradeCount + cashCount,
+    tradeRows: tradeCount,
+    cashRows: cashCount,
+    depositRows,
+    sweepRows,
+    commissionRows: cashCommissionRows,
+    lastImportDate,
   };
 }

@@ -21,6 +21,8 @@ export interface MetricDeltas {
 export interface MetricsSummary {
   range: { from: string; to: string };
   totalTrades: number;
+  openTrades: number;
+  closedTrades: number;
   wins: number;
   losses: number;
   breakevens: number;
@@ -28,6 +30,7 @@ export interface MetricsSummary {
   profitFactor: number;
   netRoi: number;
   netPnl: number;
+  realizedPnlGross: number;
   grossProfit: number;
   grossLoss: number;
   avgWin: number;
@@ -35,6 +38,10 @@ export interface MetricsSummary {
   expectancy: number;
   maxDrawdown: number;
   totalCommission: number;
+  bestTrade: number;
+  worstTrade: number;
+  totalTradeVolume: number;
+  lastTradeDate: string | null;
   deltas: MetricDeltas;
   currency: string;
 }
@@ -163,12 +170,29 @@ export interface CashTransaction {
 }
 
 export interface CashSummary {
-  totalTransactions: number;
-  netCash: number;
-  totalInflows: number;
-  totalOutflows: number;
-  totalCommission: number;
   totalDepositedUsd: number;
+  totalDepositedIls: number;
+  totalWithdrawnUsd: number;
+  totalWithdrawnIls: number;
+  netDepositedUsd: number;
+  netDepositedIls: number;
+  cashFxCommissionPaid: number;
+  depositCount: number;
+  withdrawalCount: number;
+  sweepCount: number;
+  avgDepositUsd: number;
+  firstDepositDate: string | null;
+  lastDepositDate: string | null;
+}
+
+export interface TransactionsSummary {
+  importedRows: number;
+  tradeRows: number;
+  cashRows: number;
+  depositRows: number;
+  sweepRows: number;
+  commissionRows: number;
+  lastImportDate: string | null;
 }
 
 export interface ExecutionQuery {

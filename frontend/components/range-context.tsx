@@ -11,7 +11,7 @@ interface RangeContextValue {
 const RangeContext = React.createContext<RangeContextValue | null>(null);
 
 export function RangeProvider({ children }: { children: React.ReactNode }) {
-  const [range, setRange] = React.useState<Range>("30d");
+  const [range, setRange] = React.useState<Range>("ytd");
   return (
     <RangeContext.Provider value={{ range, setRange }}>
       {children}
