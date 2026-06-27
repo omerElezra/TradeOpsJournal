@@ -198,6 +198,31 @@ def make_trade_id(row):
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
+def canon_num(x):
+    """Canonical number string — whole numbers omit decimal (100.0 → '100')."""
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return ""
+    if pd.isna(f):
+        return ""
+    return str(int(f)) if f == int(f) else repr(f)
+
+
+def make_trade_content_hash(row):
+    """Cross-path dedup fingerprint — MUST match tradeContentHash() in frontend/lib/hash.ts."""
+    key = f"{row.get('exec_time','')}|{row['symbol']}|{canon_num(row['quantity'])}|{canon_num(row['price'])}"
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def make_cash_content_hash(row):
+    """Cross-path dedup fingerprint — MUST match cashContentHash() in frontend/lib/hash.ts."""
+    rate = row.get("rate")
+    rate_str = canon_num(rate) if rate is not None and not pd.isna(rate) else "0"
+    key = f"{row.get('exec_time','')}|{row['symbol']}|{canon_num(row['quantity'])}|{rate_str}"
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
 # ── Cash / FX transactions ─────────────────────────────────────────────────────
 
 def parse_cash_csv(csv_bytes):
@@ -280,6 +305,7 @@ def transform_cash(cash_rows):
         return "cash_" + hashlib.sha256(key.encode()).hexdigest()[:28]
 
     df["transaction_id"] = df.apply(make_cash_id, axis=1)
+    df["content_hash"]   = df.apply(make_cash_content_hash, axis=1)
     df.drop(columns=["ibkr_trade_id"], inplace=True)
 
     return df.to_dict(orient="records")
@@ -359,7 +385,8 @@ def transform(executions):
     # Sort by OrderTime — preserves chronological order for repeated same-symbol trades
     df.sort_values("exec_time", inplace=True)
 
-    df["trade_id"] = df.apply(make_trade_id, axis=1)
+    df["trade_id"]     = df.apply(make_trade_id, axis=1)
+    df["content_hash"] = df.apply(make_trade_content_hash, axis=1)
     df.drop(columns=["ibkr_trade_id"], inplace=True)
 
     return df.to_dict(orient="records")
