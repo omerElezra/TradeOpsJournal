@@ -30,6 +30,8 @@ Stores individual stock execution fills parsed from IBKR `STK` rows.
 | `commission` | `NUMERIC` | No | IBKR commission |
 | `realized_pnl` | `NUMERIC` | No | FIFO realized P&L from IBKR |
 | `currency` | `TEXT` | No | Currency, default `USD` |
+| `source` | `TEXT` | Yes | `ibkr` (CSV ingest) or `manual` (UI entry), default `ibkr` |
+| `content_hash` | `TEXT` | Yes | `SHA256(exec_time\|symbol\|quantity\|price)[:32]` — non-unique dedup fingerprint shared with `ingest.py`; lets ingest merge a manual row instead of duplicating it |
 | `created_at` | `TIMESTAMPTZ` | No | Insert timestamp |
 
 ```sql
@@ -73,6 +75,8 @@ Stores cash and FX execution rows from IBKR `CASH` rows.
 | `rate` | `NUMERIC` | No | FX rate from IBKR `TradePrice` |
 | `net_cash` | `NUMERIC` | No | Net cash from IBKR |
 | `commission` | `NUMERIC` | No | IBKR commission |
+| `source` | `TEXT` | Yes | `ibkr` or `manual`, default `ibkr` |
+| `content_hash` | `TEXT` | Yes | `SHA256(exec_time\|symbol\|quantity\|rate)[:32]` — non-unique dedup fingerprint shared with `ingest.py` |
 | `created_at` | `TIMESTAMPTZ` | No | Insert timestamp |
 
 ```sql

@@ -142,6 +142,8 @@ export interface TradeQuery {
   result?: TradeResult;
 }
 
+export type TxnSource = "ibkr" | "manual";
+
 export interface RawExecutionRow {
   tradeId: string;
   execTime: string;
@@ -153,6 +155,39 @@ export interface RawExecutionRow {
   commission: number | null;
   realizedPnl: number | null;
   currency: string;
+  source: TxnSource;
+}
+
+export interface ManualTradeInput {
+  execTime: string;          // "YYYY-MM-DDTHH:MM" or full ISO
+  symbol: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  commission?: number | null;
+  currency?: string;
+}
+
+export interface ManualCashInput {
+  execTime: string;
+  symbol: string;            // FX pair, e.g. "USD.ILS"
+  quantity: number;
+  rate?: number | null;
+  netCash?: number | null;
+  action?: "BUY" | "SELL" | null;
+  description?: string | null;
+  commission?: number | null;
+  currency?: string;
+}
+
+export interface ManualInsertResult {
+  inserted: number;
+  skipped: number;
+}
+
+export interface DeleteResult {
+  deleted: boolean;
+  source: TxnSource;
 }
 
 export interface CashTransaction {
@@ -167,6 +202,7 @@ export interface CashTransaction {
   netCash: number | null;
   commission: number | null;
   txnType: string | null;  // "deposit" | "sweep"
+  source: TxnSource;
 }
 
 export interface CashSummary {

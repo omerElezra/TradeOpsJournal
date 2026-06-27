@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRange } from "@/components/range-context";
 import { useCash, useCashSummary } from "@/hooks/use-cash";
 import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
@@ -8,6 +9,8 @@ import { MetricCard } from "@/components/metrics/metric-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { AddCashSheet } from "@/components/cash/add-cash-sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Card,
   CardContent,
@@ -22,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Download, Search } from "lucide-react";
+import { Download, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
 import type { CashTransaction, CashQuery } from "@/types";
@@ -67,6 +70,59 @@ export default function CashPage() {
   });
 
   const { data: summary, isLoading: summaryLoading } = useCashSummary(range);
+
+  const queryClient = useQueryClient();
+  const [addOpen, setAddOpen] = React.useState(false);
+  const [pendingDelete, setPendingDelete] = React.useState<CashTransaction | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const [toast, setToast] = React.useState<string | null>(null);
+
+  const refresh = React.useCallback(() => {
+    isLoadMore.current = false;
+    setCursor(null);
+    queryClient.invalidateQueries({ queryKey: ["cash"] });
+    queryClient.invalidateQueries({ queryKey: ["cashSummary"] });
+    queryClient.invalidateQueries({ queryKey: ["transactionsSummary"] });
+  }, [queryClient]);
+
+  React.useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  const handleSaved = (result: { inserted: number; skipped: number }) => {
+    setToast(
+      `Added ${result.inserted} transaction${result.inserted === 1 ? "" : "s"}` +
+        (result.skipped ? ` · ${result.skipped} duplicate(s) skipped` : ""),
+    );
+    refresh();
+  };
+
+  const requestDelete = (row: CashTransaction) => {
+    if (row.source === "ibkr") {
+      setPendingDelete(row);
+    } else {
+      void runDelete(row);
+    }
+  };
+
+  const runDelete = async (row: CashTransaction) => {
+    setDeleting(true);
+    try {
+      await api.deleteCash(row.transactionId);
+      setAllRows((prev) => prev.filter((r) => r.transactionId !== row.transactionId));
+      setTotal((t) => Math.max(0, t - 1));
+      setToast(`Deleted ${row.symbol} ${row.quantity}`);
+      queryClient.invalidateQueries({ queryKey: ["cashSummary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactionsSummary"] });
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  };
 
   React.useEffect(() => {
     if (!data) return;
@@ -217,6 +273,14 @@ export default function CashPage() {
               />
             </div>
             <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add cash
+            </Button>
+            <Button
               variant="outline"
               size="sm"
               disabled={exporting}
@@ -251,13 +315,15 @@ export default function CashPage() {
                 <TableHead className="text-right">Commission</TableHead>
                 <TableHead>Currency</TableHead>
                 <TableHead>Notes</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 10 }).map((_, j) => (
+                    {Array.from({ length: 12 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-16" />
                       </TableCell>
@@ -310,13 +376,28 @@ export default function CashPage() {
                       <TableCell className="text-xs text-muted-foreground">
                         {isDeposit ? "Real Cash Flow" : "Internal Movement"}
                       </TableCell>
+                      <TableCell>
+                        <Badge variant={row.source === "manual" ? "positive" : "neutral"}>
+                          {row.source === "manual" ? "Manual" : "IBKR"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <button
+                          onClick={() => requestDelete(row)}
+                          disabled={deleting}
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-negative disabled:opacity-30"
+                          aria-label={`Delete ${row.symbol} ${row.quantity}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </TableCell>
                     </TableRow>
                   );
                 })
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={10}
+                    colSpan={12}
                     className="h-24 text-center text-muted-foreground"
                   >
                     No cash movements in this range.
@@ -368,6 +449,34 @@ export default function CashPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AddCashSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSaved={handleSaved}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete IBKR-sourced cash transaction?"
+        destructive
+        confirmLabel="Delete anyway"
+        busy={deleting}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && runDelete(pendingDelete)}
+        message={
+          <>
+            This entry was imported from IBKR and will re-appear on the next daily
+            sync. Delete anyway?
+          </>
+        }
+      />
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-border bg-card px-4 py-2 text-sm shadow-lg">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

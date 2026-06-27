@@ -198,6 +198,35 @@ def make_trade_id(row):
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
+def canon_num(x):
+    """
+    Canonical number string shared by ingest.py and the frontend manual API.
+    Whole numbers render without a decimal (100.0 -> "100"); others use the
+    shortest round-trip form (213.5 -> "213.5"), matching JS String(Number).
+    """
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return ""
+    if pd.isna(f):
+        return ""
+    return str(int(f)) if f.is_integer() else repr(f)
+
+
+def make_trade_content_hash(row):
+    """Cross-path dedup fingerprint — MUST match tradeContentHash() in frontend/lib/hash.ts."""
+    key = f"{row.get('exec_time','')}|{row['symbol']}|{canon_num(row['quantity'])}|{canon_num(row['price'])}"
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def make_cash_content_hash(row):
+    """Cross-path dedup fingerprint — MUST match cashContentHash() in frontend/lib/hash.ts."""
+    rate = row.get("rate")
+    rate_str = canon_num(rate) if rate is not None and not pd.isna(rate) else "0"
+    key = f"{row.get('exec_time','')}|{row['symbol']}|{canon_num(row['quantity'])}|{rate_str}"
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
 # ── Cash / FX transactions ─────────────────────────────────────────────────────
 
 def parse_cash_csv(csv_bytes):
@@ -280,6 +309,8 @@ def transform_cash(cash_rows):
         return "cash_" + hashlib.sha256(key.encode()).hexdigest()[:28]
 
     df["transaction_id"] = df.apply(make_cash_id, axis=1)
+    df["content_hash"]   = df.apply(make_cash_content_hash, axis=1)
+    df["source"]         = "ibkr"
     df.drop(columns=["ibkr_trade_id"], inplace=True)
 
     return df.to_dict(orient="records")
@@ -297,11 +328,53 @@ def check_existing_cash_ids(client, ids):
     return {row["transaction_id"] for row in res.data}
 
 
+def merge_manual_cash(client, records):
+    """
+    For any incoming record whose content_hash already exists with source='manual',
+    update that row with the IBKR transaction_id and flip source to 'ibkr'. This
+    absorbs a manually-entered row when the matching IBKR CSV row arrives later,
+    instead of inserting a duplicate. Returns the records that still need insert.
+    """
+    if not records:
+        return []
+    hashes = [r["content_hash"] for r in records]
+    res = (
+        client.table("cash_transactions")
+        .select("content_hash")
+        .in_("content_hash", hashes)
+        .eq("source", "manual")
+        .execute()
+    )
+    # Consume each manual hash only once (see merge_manual_trades).
+    remaining = {row["content_hash"] for row in res.data}
+    if not remaining:
+        return records
+
+    to_insert = []
+    for r in records:
+        h = r["content_hash"]
+        if h in remaining:
+            remaining.discard(h)
+            client.table("cash_transactions").update({
+                "transaction_id": r["transaction_id"],
+                "source":         "ibkr",
+                "commission":     r.get("commission"),
+                "net_cash":       r.get("net_cash"),
+                "rate":           r.get("rate"),
+                "description":    r.get("description"),
+            }).eq("content_hash", h).eq("source", "manual").execute()
+        else:
+            to_insert.append(r)
+    return to_insert
+
+
 def upsert_cash_to_supabase(client, records):
     if not records:
         return 0
-    client.table("cash_transactions").upsert(sanitize_records(records), on_conflict="transaction_id").execute()
-    return len(records)
+    new_records = merge_manual_cash(client, records)
+    if new_records:
+        client.table("cash_transactions").upsert(sanitize_records(new_records), on_conflict="transaction_id").execute()
+    return len(new_records)
 
 
 def print_cash_table(records, existing_ids):
@@ -359,7 +432,9 @@ def transform(executions):
     # Sort by OrderTime — preserves chronological order for repeated same-symbol trades
     df.sort_values("exec_time", inplace=True)
 
-    df["trade_id"] = df.apply(make_trade_id, axis=1)
+    df["trade_id"]     = df.apply(make_trade_id, axis=1)
+    df["content_hash"] = df.apply(make_trade_content_hash, axis=1)
+    df["source"]       = "ibkr"
     df.drop(columns=["ibkr_trade_id"], inplace=True)
 
     return df.to_dict(orient="records")
@@ -389,11 +464,54 @@ def check_existing_trade_ids(client, trade_ids):
     return {row["trade_id"] for row in res.data}
 
 
+def merge_manual_trades(client, records):
+    """
+    For any incoming record whose content_hash already exists with source='manual',
+    update that row with the IBKR trade_id and flip source to 'ibkr'. This absorbs
+    a manually-entered trade when the matching IBKR CSV row arrives later, instead
+    of inserting a duplicate. Returns the records that still need insert.
+    """
+    if not records:
+        return []
+    hashes = [r["content_hash"] for r in records]
+    res = (
+        client.table("trades")
+        .select("content_hash")
+        .in_("content_hash", hashes)
+        .eq("source", "manual")
+        .execute()
+    )
+    # Consume each manual hash only once: a second incoming fill with the same
+    # economics (distinct partial fill) must insert as a new row, not overwrite
+    # the row we just merged.
+    remaining = {row["content_hash"] for row in res.data}
+    if not remaining:
+        return records
+
+    to_insert = []
+    for r in records:
+        h = r["content_hash"]
+        if h in remaining:
+            remaining.discard(h)
+            client.table("trades").update({
+                "trade_id":     r["trade_id"],
+                "source":       "ibkr",
+                "commission":   r.get("commission"),
+                "realized_pnl": r.get("realized_pnl"),
+                "proceeds":     r.get("proceeds"),
+            }).eq("content_hash", h).eq("source", "manual").execute()
+        else:
+            to_insert.append(r)
+    return to_insert
+
+
 def upsert_to_supabase(client, records):
     if not records:
         return 0
-    client.table("trades").upsert(sanitize_records(records), on_conflict="trade_id").execute()
-    return len(records)
+    new_records = merge_manual_trades(client, records)
+    if new_records:
+        client.table("trades").upsert(sanitize_records(new_records), on_conflict="trade_id").execute()
+    return len(new_records)
 
 
 def print_trade_table(records, existing_ids):

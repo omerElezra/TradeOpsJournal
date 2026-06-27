@@ -3,10 +3,14 @@ import type {
   CashQuery,
   CashSummary,
   CashTransaction,
+  DeleteResult,
   EquityPoint,
   ExecutionQuery,
   Insight,
   JournalEntry,
+  ManualCashInput,
+  ManualInsertResult,
+  ManualTradeInput,
   MetricsSummary,
   Paginated,
   Range,
@@ -71,8 +75,30 @@ export const api = {
   getExecutions: (params: ExecutionQuery) =>
     request<Paginated<RawExecutionRow>>(`/api/v1/executions${qs({ ...params })}`),
 
+  addManualTrades: (trades: ManualTradeInput[]) =>
+    request<ManualInsertResult>(`/api/v1/trades/manual`, {
+      method: "POST",
+      body: JSON.stringify(trades),
+    }),
+
+  deleteExecution: (tradeId: string) =>
+    request<DeleteResult>(`/api/v1/executions/${encodeURIComponent(tradeId)}`, {
+      method: "DELETE",
+    }),
+
   getCash: (params: CashQuery) =>
     request<Paginated<CashTransaction>>(`/api/v1/cash${qs({ ...params })}`),
+
+  addManualCash: (txns: ManualCashInput[]) =>
+    request<ManualInsertResult>(`/api/v1/cash/manual`, {
+      method: "POST",
+      body: JSON.stringify(txns),
+    }),
+
+  deleteCash: (transactionId: string) =>
+    request<DeleteResult>(`/api/v1/cash/${encodeURIComponent(transactionId)}`, {
+      method: "DELETE",
+    }),
 
   getCashSummary: (range: Range) =>
     request<CashSummary>(`/api/v1/cash/summary${qs({ range })}`),

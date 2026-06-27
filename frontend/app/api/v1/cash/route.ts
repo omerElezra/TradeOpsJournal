@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
     netCash: r.net_cash != null ? Number(r.net_cash) : null,
     commission: r.commission != null ? Number(r.commission) : null,
     txnType: Number(r.quantity ?? 0) > 50 ? "deposit" : "sweep",
+    source: (r.source === "manual" ? "manual" : "ibkr"),
   }));
 
   const nextOffset = offset + limit;
