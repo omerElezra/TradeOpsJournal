@@ -1,12 +1,16 @@
 "use client";
 
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRange } from "@/components/range-context";
 import { useExecutions } from "@/hooks/use-executions";
 import { useTransactionsSummary } from "@/hooks/use-transactions";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AddTradesSheet } from "@/components/trades/add-trades-sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Card,
   CardContent,
@@ -22,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
-import { Download, Search } from "lucide-react";
+import { Download, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
 import type { RawExecutionRow, ExecutionQuery } from "@/types";
@@ -88,6 +92,57 @@ export default function TransactionsPage() {
   });
 
   const { data: summary, isLoading: summaryLoading } = useTransactionsSummary();
+
+  const queryClient = useQueryClient();
+  const [addOpen, setAddOpen] = React.useState(false);
+  const [pendingDelete, setPendingDelete] = React.useState<RawExecutionRow | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const [toast, setToast] = React.useState<string | null>(null);
+
+  const refresh = React.useCallback(() => {
+    isLoadMore.current = false;
+    setCursor(null);
+    queryClient.invalidateQueries({ queryKey: ["executions"] });
+    queryClient.invalidateQueries({ queryKey: ["transactionsSummary"] });
+  }, [queryClient]);
+
+  React.useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  const handleSaved = (result: { inserted: number; skipped: number }) => {
+    setToast(
+      `Added ${result.inserted} trade${result.inserted === 1 ? "" : "s"}` +
+        (result.skipped ? ` · ${result.skipped} duplicate(s) skipped` : ""),
+    );
+    refresh();
+  };
+
+  const requestDelete = (row: RawExecutionRow) => {
+    if (row.source === "ibkr") {
+      setPendingDelete(row);
+    } else {
+      void runDelete(row);
+    }
+  };
+
+  const runDelete = async (row: RawExecutionRow) => {
+    setDeleting(true);
+    try {
+      await api.deleteExecution(row.tradeId);
+      setAllRows((prev) => prev.filter((r) => r.tradeId !== row.tradeId));
+      setTotal((t) => Math.max(0, t - 1));
+      setToast(`Deleted ${row.symbol} ${row.action} ${row.quantity}`);
+      queryClient.invalidateQueries({ queryKey: ["transactionsSummary"] });
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  };
 
   React.useEffect(() => {
     if (!data) return;
@@ -205,6 +260,14 @@ export default function TransactionsPage() {
               ))}
             </div>
             <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add trades
+            </Button>
+            <Button
               variant="outline"
               size="sm"
               disabled={exporting}
@@ -246,14 +309,15 @@ export default function TransactionsPage() {
                 <TableHead>Commission</TableHead>
                 <TableHead>Realized P&L</TableHead>
                 <TableHead>Currency</TableHead>
-                <TableHead>Classification</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 10 }).map((_, j) => (
+                    {Array.from({ length: 11 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-16" />
                       </TableCell>
@@ -301,16 +365,26 @@ export default function TransactionsPage() {
                       {row.currency}
                     </TableCell>
                     <TableCell>
-                      <span className="rounded bg-accent px-1.5 py-0.5 text-xs text-muted-foreground">
-                        Trade
-                      </span>
+                      <Badge variant={row.source === "manual" ? "positive" : "neutral"}>
+                        {row.source === "manual" ? "Manual" : "IBKR"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <button
+                        onClick={() => requestDelete(row)}
+                        disabled={deleting}
+                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-negative disabled:opacity-30"
+                        aria-label={`Delete ${row.symbol} ${row.action}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={10}
+                    colSpan={11}
                     className="h-24 text-center text-muted-foreground"
                   >
                     No executions in this range.
@@ -366,6 +440,34 @@ export default function TransactionsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AddTradesSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSaved={handleSaved}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete IBKR-sourced trade?"
+        destructive
+        confirmLabel="Delete anyway"
+        busy={deleting}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && runDelete(pendingDelete)}
+        message={
+          <>
+            This trade was imported from IBKR and will re-appear on the next daily
+            sync. Delete anyway?
+          </>
+        }
+      />
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-border bg-card px-4 py-2 text-sm shadow-lg">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

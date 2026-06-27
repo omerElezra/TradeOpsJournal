@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
     commission: r.commission != null ? Number(r.commission) : null,
     realizedPnl: r.realized_pnl != null ? Number(r.realized_pnl) : null,
     currency: String(r.currency ?? "USD"),
+    source: (r.source === "manual" ? "manual" : "ibkr"),
   }));
 
   const nextOffset = offset + limit;

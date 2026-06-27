@@ -1,7 +1,9 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { groupExecutions } from "@/lib/domain/grouping";
+import { canonExecTime, tradeContentHash } from "@/lib/hash";
 import type { GroupedTrade, RawExecution } from "@/lib/domain/models";
+import type { ManualTradeInput, ManualInsertResult, DeleteResult, TxnSource } from "@/types";
 
 // Normalize a Date to seconds-precision key to avoid microsecond mismatches
 // between exec_time stored in the trades table and entry_time in trade_journal
@@ -67,7 +69,7 @@ export async function fetchExecutionsPage(
   let q = db
     .from("trades")
     .select(
-      "trade_id, exec_time, symbol, action, quantity, price, proceeds, commission, realized_pnl, currency",
+      "trade_id, exec_time, symbol, action, quantity, price, proceeds, commission, realized_pnl, currency, source",
       { count: "exact" },
     )
     .gte("exec_time", start.toISOString())
@@ -140,6 +142,74 @@ export async function loadGroups(
   );
 
   return [groups, journal];
+}
+
+export async function insertManualTrades(
+  inputs: ManualTradeInput[],
+): Promise<ManualInsertResult> {
+  const db = getSupabaseAdmin();
+
+  const rows = inputs.map((t) => {
+    const execTime = canonExecTime(t.execTime);
+    const symbol = t.symbol.trim().toUpperCase();
+    const quantity = Math.abs(Number(t.quantity));
+    const price = Number(t.price);
+    const contentHash = tradeContentHash(execTime, symbol, quantity, price);
+    return {
+      trade_id: contentHash,
+      content_hash: contentHash,
+      source: "manual" as const,
+      trade_date: execTime.slice(0, 10),
+      exec_time: execTime,
+      symbol,
+      action: t.action.toUpperCase(),
+      quantity,
+      price,
+      proceeds: null,
+      commission: t.commission != null ? Number(t.commission) : null,
+      realized_pnl: null,
+      currency: t.currency?.trim() || "USD",
+    };
+  });
+
+  // Which fingerprints already exist? Those are skipped (idempotent).
+  const hashes = rows.map((r) => r.content_hash);
+  const { data: existing, error: selErr } = await db
+    .from("trades")
+    .select("content_hash")
+    .in("content_hash", hashes);
+  if (selErr) throw new Error(`insertManualTrades select: ${selErr.message}`);
+  const existingHashes = new Set((existing ?? []).map((r) => String(r.content_hash)));
+
+  // De-dupe within the submitted batch too.
+  const seen = new Set<string>();
+  const toInsert = rows.filter((r) => {
+    if (existingHashes.has(r.content_hash) || seen.has(r.content_hash)) return false;
+    seen.add(r.content_hash);
+    return true;
+  });
+
+  if (toInsert.length) {
+    const { error } = await db.from("trades").insert(toInsert);
+    if (error) throw new Error(`insertManualTrades insert: ${error.message}`);
+  }
+
+  return { inserted: toInsert.length, skipped: rows.length - toInsert.length };
+}
+
+export async function deleteExecution(tradeId: string): Promise<DeleteResult> {
+  const db = getSupabaseAdmin();
+  const { data: existing, error: selErr } = await db
+    .from("trades")
+    .select("source")
+    .eq("trade_id", tradeId)
+    .maybeSingle();
+  if (selErr) throw new Error(`deleteExecution select: ${selErr.message}`);
+  if (!existing) return { deleted: false, source: "ibkr" };
+
+  const { error } = await db.from("trades").delete().eq("trade_id", tradeId);
+  if (error) throw new Error(`deleteExecution delete: ${error.message}`);
+  return { deleted: true, source: (String(existing.source) as TxnSource) ?? "ibkr" };
 }
 
 function toRawExecution(r: Record<string, unknown>): RawExecution {
