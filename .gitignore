@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 .claude
 examples
+# Local dev launcher (contains internal proxy config)
+run-dev.sh

@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
     netPnl: r2(g.netPnl),
     result: g.result,
     symbol: g.symbol,
+    holdingMinutes: g.holdingMinutes,
   }));
 
   // ── By symbol ─────────────────────────────────────────────────────────────

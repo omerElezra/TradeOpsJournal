@@ -11,6 +11,7 @@ import { WinLossDonut } from "@/components/charts/win-loss-donut";
 import { PnlBars } from "@/components/charts/pnl-bars";
 import { SymbolPnlChart } from "@/components/charts/symbol-pnl-chart";
 import { MonthlyPnlChart } from "@/components/charts/monthly-pnl-chart";
+import { HoldTimeChart } from "@/components/charts/hold-time-chart";
 
 function ChartCard({
   title,
@@ -126,7 +127,21 @@ export default function AnalyticsPage() {
         </ChartCard>
       </div>
 
-      {/* Row 4: Monthly P&L + Symbol Performance */}
+      {/* Row 4: Hold Time scatter */}
+      <ChartCard
+        title="Hold Time vs P&L"
+        subtitle={
+          analytics
+            ? `${analytics.pnlPerTrade.filter(t => t.holdingMinutes != null).length} trades with hold time data`
+            : undefined
+        }
+        loading={analyticsLoading}
+        skeletonH="h-64"
+      >
+        <HoldTimeChart data={analytics?.pnlPerTrade ?? []} height={260} />
+      </ChartCard>
+
+      {/* Row 5: Monthly P&L + Symbol Performance */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <ChartCard
           title="Monthly P&L"

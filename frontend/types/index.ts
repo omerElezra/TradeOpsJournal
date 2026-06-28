@@ -299,6 +299,7 @@ export interface AnalyticsTrade {
   netPnl: number;
   result: TradeResult;
   symbol: string;
+  holdingMinutes: number | null;
 }
 
 export interface SymbolPerformance {
