@@ -5,15 +5,16 @@ const nextConfig = {
   experimental: {
     instrumentationHook: true,
   },
-  webpack: (config, { dev, isServer }) => {
+  webpack: (config, { dev, isServer, nextRuntime }) => {
     if (dev) {
       // Docker on macOS (Colima) doesn't forward inotify events — use polling instead
       config.watchOptions = { poll: 1000, aggregateTimeout: 300 };
     }
-    if (isServer) {
-      // Don't bundle undici (used by instrumentation.ts for the proxy dispatcher);
-      // require it at runtime from node_modules instead. The "commonjs" type makes
-      // webpack emit require("undici") rather than a bare global reference.
+    if (isServer && nextRuntime !== "edge") {
+      // Externalize undici for the Node.js server build only.
+      // The Edge runtime (middleware) can't use native modules — and the
+      // import("undici") in instrumentation.ts is dead code there anyway
+      // because of the NEXT_RUNTIME === "nodejs" guard.
       const ext = { undici: "commonjs undici" };
       config.externals = Array.isArray(config.externals)
         ? [...config.externals, ext]
