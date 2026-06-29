@@ -286,6 +286,28 @@ export interface AccountTxnSummary {
   totalRows: number;
 }
 
+// ─── Interest accruals (IBKR IACC BASE_SUMMARY: daily accrued interest) ────────
+
+export interface AccrualPoint {
+  t: string;            // to_date (ISO date)
+  accrued: number;      // interest accrued that day
+  cumulative: number;   // running sum of accrued over the range
+  fx: number;           // FX translation that day
+}
+
+export interface AccrualSummary {
+  totalAccrued: number;     // sum of accrued in range
+  totalFx: number;          // sum of FX translation in range
+  dayCount: number;         // number of accrual days
+  avgDaily: number;         // totalAccrued / dayCount
+  latestDate: string | null;
+}
+
+export interface AccrualData {
+  series: AccrualPoint[];
+  summary: AccrualSummary;
+}
+
 // ─── Performance Report ───────────────────────────────────────────────────────
 
 export interface HoldingTimeStats {

@@ -19,3 +19,10 @@ export function useAccountTxnSummary(range: Range) {
     queryFn: () => api.getAccountTxnSummary(range),
   });
 }
+
+export function useInterestAccruals(range: Range) {
+  return useQuery({
+    queryKey: qk.interestAccruals(range),
+    queryFn: () => api.getInterestAccruals(range),
+  });
+}

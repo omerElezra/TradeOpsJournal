@@ -12,5 +12,6 @@ export const qk = {
   transactionsSummary: () => ["transactionsSummary"] as const,
   accountTxns: (params: AccountTxnQuery) => ["accountTxns", params] as const,
   accountTxnsSummary: (range: Range) => ["accountTxnsSummary", range] as const,
+  interestAccruals: (range: Range) => ["interestAccruals", range] as const,
   analytics: (range: Range) => ["analytics", range] as const,
 };

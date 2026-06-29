@@ -2,8 +2,14 @@
 
 import * as React from "react";
 import { useRange } from "@/components/range-context";
-import { useAccountTxns, useAccountTxnSummary } from "@/hooks/use-account-transactions";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import {
+  useAccountTxns,
+  useAccountTxnSummary,
+  useInterestAccruals,
+} from "@/hooks/use-account-transactions";
+import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
+import { MetricCard } from "@/components/metrics/metric-card";
+import { AccrualChart } from "@/components/charts/accrual-chart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -88,6 +94,7 @@ export default function AccountTransactionsPage() {
 
   const { data, isLoading, isFetching } = useAccountTxns(queryParams);
   const { data: summary, isLoading: summaryLoading } = useAccountTxnSummary(range);
+  const { data: accruals, isLoading: accrualsLoading } = useInterestAccruals(range);
 
   const resetFilters = () => {
     isLoadMore.current = false;
@@ -155,6 +162,91 @@ export default function AccountTransactionsPage() {
               No account transactions in this range.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Interest accruals (IACC BASE_SUMMARY) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Interest Accruals</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Daily accrued (not-yet-posted) interest — distinct from the posted
+            Broker Interest rows above.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <MetricCard
+              label="Total Accrued"
+              value={accruals ? formatCurrency(accruals.summary.totalAccrued) : "—"}
+              description="Sum of daily accruals in range"
+              intent={
+                accruals && accruals.summary.totalAccrued < 0 ? "negative" : "positive"
+              }
+              isLoading={accrualsLoading}
+            />
+            <MetricCard
+              label="FX Translation"
+              value={accruals ? formatCurrency(accruals.summary.totalFx) : "—"}
+              description="Sum of FX translation in range"
+              intent="neutral"
+              isLoading={accrualsLoading}
+            />
+            <MetricCard
+              label="Accrual Days"
+              value={accruals ? String(accruals.summary.dayCount) : "—"}
+              description="Days with a nonzero accrual"
+              intent="neutral"
+              isLoading={accrualsLoading}
+            />
+            <MetricCard
+              label="Avg / Day"
+              value={accruals ? formatCurrency(accruals.summary.avgDaily) : "—"}
+              description="Total accrued ÷ accrual days"
+              intent="neutral"
+              isLoading={accrualsLoading}
+            />
+          </div>
+          {accrualsLoading ? (
+            <Skeleton className="h-[240px] w-full" />
+          ) : (
+            <AccrualChart data={accruals?.series ?? []} />
+          )}
+
+          {/* Daily accrual rows */}
+          {!accrualsLoading && (accruals?.series.length ?? 0) > 0 && (
+            <div className="max-h-80 overflow-auto rounded-md border border-border">
+              <Table>
+                <TableHeader className="sticky top-0 bg-card">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Accrued</TableHead>
+                    <TableHead className="text-right">Cumulative</TableHead>
+                    <TableHead className="text-right">FX Translation</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...(accruals?.series ?? [])].reverse().map((p) => (
+                    <TableRow key={p.t}>
+                      <TableCell className="tabular text-muted-foreground">{p.t}</TableCell>
+                      <TableCell className={`tabular text-right ${amountClass(p.accrued)}`}>
+                        {formatNumber(p.accrued, 4)}
+                      </TableCell>
+                      <TableCell className={`tabular text-right ${amountClass(p.cumulative)}`}>
+                        {formatNumber(p.cumulative, 2)}
+                      </TableCell>
+                      <TableCell className="tabular text-right text-muted-foreground">
+                        {p.fx ? formatNumber(p.fx, 4) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <p className="text-[10px] text-muted-foreground/60">
+            {accruals?.series.length ?? 0} day(s) in range · switch range to “All” to see the full history.
+          </p>
         </CardContent>
       </Card>
 
