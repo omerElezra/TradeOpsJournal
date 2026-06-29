@@ -8,6 +8,7 @@ Safe to run multiple times — upsert on trade_id prevents duplicates.
 import base64
 import hashlib
 import io
+import math
 import os
 import sys
 from datetime import date, timedelta
@@ -362,13 +363,7 @@ def transform_cash(cash_rows):
 def check_existing_cash_ids(client, ids):
     if not ids:
         return set()
-    res = (
-        client.table("cash_transactions")
-        .select("transaction_id")
-        .in_("transaction_id", ids)
-        .execute()
-    )
-    return {row["transaction_id"] for row in res.data}
+    return _select_in_chunks(client, "cash_transactions", "transaction_id", ids)
 
 
 def merge_manual_cash(client, records):
@@ -381,31 +376,27 @@ def merge_manual_cash(client, records):
     if not records:
         return []
     hashes = [r["content_hash"] for r in records]
-    res = (
-        client.table("cash_transactions")
-        .select("content_hash")
-        .in_("content_hash", hashes)
-        .eq("source", "manual")
-        .execute()
-    )
     # Consume each manual hash only once (see merge_manual_trades).
-    remaining = {row["content_hash"] for row in res.data}
+    remaining = _select_in_chunks(client, "cash_transactions", "content_hash", hashes, {"source": "manual"})
     if not remaining:
         return records
+
+    # transaction_ids already present must not be re-keyed onto a manual row
+    # (unique constraint). Treat them as duplicates for the upsert instead.
+    present_ids = _select_in_chunks(
+        client, "cash_transactions", "transaction_id", [r["transaction_id"] for r in records]
+    )
 
     to_insert = []
     for r in records:
         h = r["content_hash"]
-        if h in remaining:
+        if h in remaining and r["transaction_id"] not in present_ids:
             remaining.discard(h)
-            client.table("cash_transactions").update({
-                "transaction_id": r["transaction_id"],
-                "source":         "ibkr",
-                "commission":     r.get("commission"),
-                "net_cash":       r.get("net_cash"),
-                "rate":           r.get("rate"),
-                "description":    r.get("description"),
-            }).eq("content_hash", h).eq("source", "manual").execute()
+            update = {"transaction_id": r["transaction_id"], "source": "ibkr"}
+            for k in ("commission", "net_cash", "rate", "description"):
+                if _present(r.get(k)):
+                    update[k] = r.get(k)
+            client.table("cash_transactions").update(update).eq("content_hash", h).eq("source", "manual").execute()
         else:
             to_insert.append(r)
     return to_insert
@@ -420,12 +411,82 @@ def upsert_cash_to_supabase(client, records):
     return len(new_records)
 
 
-def print_cash_table(records, existing_ids):
+# ── Supabase query helpers ──────────────────────────────────────────────────────
+
+def _present(v):
+    """True unless the value is None or a float NaN (treat both as 'no value')."""
+    return v is not None and not (isinstance(v, float) and math.isnan(v))
+
+
+def _select_in_chunks(client, table, column, values, extra_eq=None, chunk=100):
+    """
+    Run `select(column).in_(column, values)` in batches and return the set of
+    matched values. A single .in_() with hundreds of values overflows the GET
+    request URL (PostgREST 400), so we page through in chunks — important for
+    large backfills (e.g. a full-year Flex export with 900+ trades).
+    """
+    found = set()
+    uniq = list({v for v in values if v})
+    for i in range(0, len(uniq), chunk):
+        batch = uniq[i:i + chunk]
+        q = client.table(table).select(column).in_(column, batch)
+        for k, v in (extra_eq or {}).items():
+            q = q.eq(k, v)
+        res = q.execute()
+        found.update(row[column] for row in res.data)
+    return found
+
+
+# ── Dry-run helpers ─────────────────────────────────────────────────────────────
+
+def _manual_hashes(client, table, records):
+    """Return the content_hashes among `records` that already exist as manual rows.
+
+    Lets the dry run flag rows that would MERGE into a manual entry (update,
+    not insert) rather than be reported as brand-new inserts.
+    """
+    hashes = [r["content_hash"] for r in records if r.get("content_hash")]
+    if not hashes:
+        return set()
+    return _select_in_chunks(client, table, "content_hash", hashes, {"source": "manual"})
+
+
+def _row_status(rec, id_field, existing_ids, manual_hashes, dry_run):
+    """Classify one record: DUPLICATE (by id), MERGE (manual content_hash), or NEW."""
+    if rec[id_field] in existing_ids:
+        return "DUPLICATE (skip)"
+    if rec.get("content_hash") in manual_hashes:
+        return "MERGE manual (would update)" if dry_run else "MERGE manual→ibkr"
+    return "NEW → would insert" if dry_run else "NEW → inserted"
+
+
+def report_missing(records, required, label):
+    """Print any rows missing a value in one of the `required` fields. Returns the gaps."""
+    import math
+    gaps_found = []
+    for i, r in enumerate(records, 1):
+        gaps = [
+            f for f in required
+            if r.get(f) in (None, "", "NaT")
+            or (isinstance(r.get(f), float) and math.isnan(r.get(f)))
+        ]
+        if gaps:
+            gaps_found.append((i, gaps))
+    if gaps_found:
+        print(f"  ⚠ {label}: {len(gaps_found)} row(s) missing required field(s):")
+        for i, gaps in gaps_found[:25]:
+            print(f"      row {i}: missing {gaps}")
+    else:
+        print(f"  ✓ {label}: all required fields present")
+    return gaps_found
+
+
+def print_cash_table(records, existing_ids, manual_hashes=frozenset(), dry_run=False):
     print()
     print(f"  {'#':<4} {'DateTime':<20} {'Symbol':<12} {'Action':<5} {'Qty':>10} {'Rate':>10} {'NetCash':>10} {'Status'}")
-    print("  " + "-" * 90)
+    print("  " + "-" * 95)
     for i, r in enumerate(records, 1):
-        status  = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
+        status  = _row_status(r, "transaction_id", existing_ids, manual_hashes, dry_run)
         order_t = str(r.get("exec_time") or r.get("transaction_date") or "")[:19].replace("T", " ")
         qty     = r.get("quantity") or 0
         rate    = r.get("rate") or 0
@@ -502,6 +563,9 @@ def transform_ctrn(rows):
     df["transaction_date"] = dt.dt.date.astype(str)
 
     df["amount"]      = pd.to_numeric(col("Amount"), errors="coerce")
+    # FX rate to base currency (USD). Present in the Interactive template; the
+    # older template omits it, in which case col() yields NaN → None.
+    df["fx_rate_to_base"] = pd.to_numeric(col("FXRateToBase"), errors="coerce")
     df["ibkr_txn_id"] = col("TransactionID")
 
     df.dropna(subset=["amount"], inplace=True)
@@ -525,13 +589,7 @@ def transform_ctrn(rows):
 def check_existing_ctrn_ids(client, ids):
     if not ids:
         return set()
-    res = (
-        client.table("account_transactions")
-        .select("transaction_id")
-        .in_("transaction_id", ids)
-        .execute()
-    )
-    return {row["transaction_id"] for row in res.data}
+    return _select_in_chunks(client, "account_transactions", "transaction_id", ids)
 
 
 def upsert_ctrn_to_supabase(client, records):
@@ -543,12 +601,12 @@ def upsert_ctrn_to_supabase(client, records):
     return len(records)
 
 
-def print_ctrn_table(records, existing_ids):
+def print_ctrn_table(records, existing_ids, dry_run=False):
     print()
     print(f"  {'#':<4} {'DateTime':<20} {'Category':<18} {'Symbol':<8} {'Amount':>12} {'Status'}")
-    print("  " + "-" * 80)
+    print("  " + "-" * 85)
     for i, r in enumerate(records, 1):
-        status = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
+        status = _row_status(r, "transaction_id", existing_ids, frozenset(), dry_run)
         when   = str(r.get("datetime") or r.get("transaction_date") or "")[:19].replace("T", " ")
         amt    = r.get("amount") or 0
         print(
@@ -556,6 +614,121 @@ def print_ctrn_table(records, existing_ids):
             f"{amt:>+12.2f}  {status}"
         )
     print()
+
+
+# ── Interest accruals (IACC: daily BASE_SUMMARY accrued interest) ────────────────
+
+def parse_iacc_csv(csv_bytes):
+    """Extract the IACC section (daily interest-accrual summary)."""
+    return extract_section(csv_bytes, "IACC")
+
+
+def transform_iacc(rows):
+    """
+    Map IACC BASE_SUMMARY rows → interest_accruals schema.
+
+    Each row is one day's accrued interest. The Flex layout puts the scope
+    label ("BASE_SUMMARY") in the CurrencyPrimary column; we keep only those.
+    Keyed on (account, to_date) so re-ingesting the same day is idempotent.
+    """
+    if rows.empty:
+        return []
+
+    scope = rows["CurrencyPrimary"].str.strip() if "CurrencyPrimary" in rows.columns else None
+    if scope is None:
+        return []
+    rows = rows[scope == "BASE_SUMMARY"].copy()
+    if rows.empty:
+        return []
+
+    def col(name):
+        return rows[name].str.strip() if name in rows.columns else pd.Series(
+            [""] * len(rows), index=rows.index
+        )
+
+    df = pd.DataFrame(index=rows.index)
+    df["account_id"]       = col("ClientAccountID")
+    df["scope"]            = "BASE_SUMMARY"
+    df["from_date"]        = parse_ctrn_dt(col("FromDate")).dt.date.astype(str)
+    df["to_date"]          = parse_ctrn_dt(col("ToDate")).dt.date.astype(str)
+    df["interest_accrued"] = pd.to_numeric(col("InterestAccrued"), errors="coerce")
+    df["fx_translation"]   = pd.to_numeric(col("FXTranslation"), errors="coerce")
+
+    df = df[(df["to_date"] != "NaT") & df["interest_accrued"].notna()]
+
+    # Ignore days where the BASE_SUMMARY is all zero (no interest accrued and no
+    # FX translation) — they carry no information and only bloat the table.
+    nonzero = (df["interest_accrued"] != 0) | (df["fx_translation"].fillna(0) != 0)
+    df = df[nonzero]
+
+    df.sort_values("to_date", inplace=True)
+
+    df["accrual_id"] = "iacc_" + df["account_id"] + "_" + df["to_date"]
+    df["source"]     = "ibkr"
+
+    return df.to_dict(orient="records")
+
+
+def check_existing_iacc_ids(client, ids):
+    if not ids:
+        return set()
+    try:
+        return _select_in_chunks(client, "interest_accruals", "accrual_id", ids)
+    except Exception as e:
+        # Table may not exist yet (migration 005 not applied). Treat all as new
+        # so a dry run can still validate parsing before the table is created.
+        print(f"  (note: interest_accruals lookup skipped — {type(e).__name__}; "
+              f"apply migration 005 before a real run)")
+        return set()
+
+
+def upsert_iacc_to_supabase(client, records):
+    if not records:
+        return 0
+    client.table("interest_accruals").upsert(
+        sanitize_records(records), on_conflict="accrual_id"
+    ).execute()
+    return len(records)
+
+
+def print_iacc_table(records, existing_ids, dry_run=False):
+    print()
+    print(f"  {'#':<4} {'ToDate':<12} {'InterestAccrued':>16} {'FXTransl':>10} {'Status'}")
+    print("  " + "-" * 70)
+    for i, r in enumerate(records, 1):
+        status = _row_status(r, "accrual_id", existing_ids, frozenset(), dry_run)
+        ia     = r.get("interest_accrued") or 0
+        fx     = r.get("fx_translation") or 0
+        print(f"  {i:<4} {str(r.get('to_date') or ''):<12} {ia:>+16.4f} {fx:>+10.4f}  {status}")
+    print()
+
+
+def _fmt_added(kind, r):
+    """One-line representation of a row that was (or would be) inserted."""
+    if kind == "trade":
+        return (f"{r.get('exec_time',''):<19}  {r.get('symbol',''):<6} {str(r.get('action','')):<4} "
+                f"qty={r.get('quantity')} @ {r.get('price')}  "
+                f"pnl={r.get('realized_pnl')} comm={r.get('commission')} id={r.get('trade_id')}")
+    if kind == "cash":
+        return (f"{r.get('exec_time',''):<19}  {r.get('symbol',''):<8} {str(r.get('action','')):<4} "
+                f"qty={r.get('quantity')} rate={r.get('rate')} net={r.get('net_cash')} id={r.get('transaction_id')}")
+    if kind == "account txn":
+        return (f"{r.get('datetime',''):<19}  {r.get('category',''):<18} {(r.get('symbol') or '-'):<6} "
+                f"{r.get('amount')} {r.get('currency','')} id={r.get('transaction_id')}")
+    if kind == "interest accrual":
+        return (f"{str(r.get('to_date','')):<12}  accrued={r.get('interest_accrued')} "
+                f"fx={r.get('fx_translation')} id={r.get('accrual_id')}")
+    return str(r)
+
+
+def print_added(kind, rows, dry_run):
+    """Print the exact rows that were inserted (or would be, in dry run)."""
+    if not rows:
+        return
+    verb = "WOULD ADD" if dry_run else "ADDED"
+    print(f"\n  ── {verb} {len(rows)} {kind} row(s) ──")
+    for r in rows:
+        print("    + " + _fmt_added(kind, r))
 
 
 def transform(executions):
@@ -619,13 +792,7 @@ def check_existing_trade_ids(client, trade_ids):
     """Return the set of trade_ids already in the trades table."""
     if not trade_ids:
         return set()
-    res = (
-        client.table("trades")
-        .select("trade_id")
-        .in_("trade_id", trade_ids)
-        .execute()
-    )
-    return {row["trade_id"] for row in res.data}
+    return _select_in_chunks(client, "trades", "trade_id", trade_ids)
 
 
 def merge_manual_trades(client, records):
@@ -638,32 +805,31 @@ def merge_manual_trades(client, records):
     if not records:
         return []
     hashes = [r["content_hash"] for r in records]
-    res = (
-        client.table("trades")
-        .select("content_hash")
-        .in_("content_hash", hashes)
-        .eq("source", "manual")
-        .execute()
-    )
     # Consume each manual hash only once: a second incoming fill with the same
     # economics (distinct partial fill) must insert as a new row, not overwrite
     # the row we just merged.
-    remaining = {row["content_hash"] for row in res.data}
+    remaining = _select_in_chunks(client, "trades", "content_hash", hashes, {"source": "manual"})
     if not remaining:
         return records
+
+    # trade_ids already in the table must NOT be re-keyed onto a manual row —
+    # that would violate the unique trade_id constraint. Such rows are plain
+    # duplicates; hand them to the upsert (on_conflict) instead of merging.
+    present_ids = _select_in_chunks(client, "trades", "trade_id", [r["trade_id"] for r in records])
 
     to_insert = []
     for r in records:
         h = r["content_hash"]
-        if h in remaining:
+        if h in remaining and r["trade_id"] not in present_ids:
             remaining.discard(h)
-            client.table("trades").update({
-                "trade_id":     r["trade_id"],
-                "source":       "ibkr",
-                "commission":   r.get("commission"),
-                "realized_pnl": r.get("realized_pnl"),
-                "proceeds":     r.get("proceeds"),
-            }).eq("content_hash", h).eq("source", "manual").execute()
+            # Only overwrite fields the incoming row actually carries. The
+            # Interactive Flex template omits NetCash/FifoPnlRealized, so a
+            # blind update would null out values the manual row already has.
+            update = {"trade_id": r["trade_id"], "source": "ibkr"}
+            for k in ("commission", "realized_pnl", "proceeds"):
+                if _present(r.get(k)):
+                    update[k] = r.get(k)
+            client.table("trades").update(update).eq("content_hash", h).eq("source", "manual").execute()
         else:
             to_insert.append(r)
     return to_insert
@@ -678,13 +844,13 @@ def upsert_to_supabase(client, records):
     return len(new_records)
 
 
-def print_trade_table(records, existing_ids):
-    """Print a formatted table of trades with NEW / DUPLICATE status."""
+def print_trade_table(records, existing_ids, manual_hashes=frozenset(), dry_run=False):
+    """Print a formatted table of trades with NEW / DUPLICATE / MERGE status."""
     print()
     print(f"  {'#':<4} {'DateTime':<20} {'Symbol':<8} {'Action':<5} {'Qty':>7} {'Price':>9} {'P&L':>10} {'Comm':>7}  {'Status'}")
-    print("  " + "-" * 90)
+    print("  " + "-" * 95)
     for i, r in enumerate(records, 1):
-        status    = "DUPLICATE (skip)" if r["trade_id"] in existing_ids else "NEW → inserted"
+        status    = _row_status(r, "trade_id", existing_ids, manual_hashes, dry_run)
         pnl       = r.get("realized_pnl") or 0
         comm      = r.get("commission") or 0
         order_t   = str(r.get("exec_time") or r.get("trade_date") or "")[:19].replace("T", " ")
@@ -695,124 +861,201 @@ def print_trade_table(records, existing_ids):
     print()
 
 
-def main():
-    # DAYS_BACK: set by workflow_dispatch input; empty on scheduled runs → default 2
-    days_back = int(os.environ.get("DAYS_BACK") or 2)
+# Required (non-nullable) fields per record type — used by the dry-run data check.
+# Fields that are legitimately empty for some rows (e.g. CTRN symbol on a deposit)
+# are intentionally omitted.
+REQUIRED_TRADE = ["symbol", "exec_time", "trade_date", "quantity", "price",
+                  "proceeds", "commission", "action", "currency", "trade_id"]
+REQUIRED_CASH  = ["symbol", "exec_time", "transaction_date", "quantity", "rate",
+                  "net_cash", "action", "currency", "transaction_id"]
+REQUIRED_CTRN  = ["datetime", "transaction_date", "amount", "currency", "type",
+                  "category", "transaction_id"]
+REQUIRED_IACC  = ["account_id", "to_date", "interest_accrued", "accrual_id"]
 
-    print("=" * 60)
-    print("  IBKR Trade Ingestion — TradeOpsJournal")
-    print(f"  Scanning last {days_back} day(s)")
-    print("=" * 60)
+
+def _parse_args(argv):
+    import argparse
+    p = argparse.ArgumentParser(description="IBKR Flex ingestion — TradeOpsJournal")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Parse and classify NEW/DUPLICATE/MERGE but write nothing to the DB.")
+    p.add_argument("--file", action="append", default=[], metavar="PATH",
+                   help="Read a local CSV instead of fetching from Gmail (repeatable).")
+    p.add_argument("--days-back", type=int, default=None,
+                   help="Override DAYS_BACK for the Gmail scan.")
+    return p.parse_args(argv)
+
+
+def collect_sources(args, days_back):
+    """Return a list of (label, csv_bytes) from local files or Gmail."""
+    if args.file:
+        sources = []
+        for path in args.file:
+            with open(path, "rb") as fh:
+                sources.append((os.path.basename(path), io.BytesIO(fh.read())))
+        print(f"Local file mode — {len(sources)} file(s) to process.\n")
+        return sources
 
     service = build_gmail_client()
     messages = find_ibkr_emails(service, days_back=days_back)
-
     if not messages:
         print("\nNo recent IBKR emails found. Nothing to do.")
-        print("(Searched: last 5 days, from Info@inter-il.com, subject 'Activity Flex')")
-        sys.exit(0)
+        print(f"(Searched: last {days_back} days, from {IBKR_SENDER}, subject '{IBKR_SUBJECT}')")
+        return []
 
     print(f"\nFound {len(messages)} email(s) to process.\n")
+    sources = []
+    for msg in messages:
+        filename, csv_bytes = download_csv_attachment(service, msg["id"])
+        if csv_bytes is None:
+            print(f"[SKIP] Message {msg['id']} — no CSV attachment found.")
+            continue
+        sources.append((f"{filename} (msg {msg['id']})", csv_bytes))
+    return sources
+
+
+def main(argv=None):
+    args = _parse_args(argv if argv is not None else sys.argv[1:])
+    dry_run = args.dry_run
+    days_back = args.days_back if args.days_back is not None else int(os.environ.get("DAYS_BACK") or 2)
+
+    print("=" * 60)
+    print("  IBKR Trade Ingestion — TradeOpsJournal")
+    if dry_run:
+        print("  *** DRY RUN — classifying only, NO writes to the database ***")
+    if not args.file:
+        print(f"  Scanning last {days_back} day(s)")
+    print("=" * 60)
 
     client = get_supabase_client()
-    total_new_trades = 0
-    total_dupe_trades = 0
-    total_new_cash = 0
-    total_dupe_cash = 0
-    total_new_ctrn = 0
-    total_dupe_ctrn = 0
+    sources = collect_sources(args, days_back)
+    if not sources:
+        sys.exit(0)
 
-    for msg in messages:
-        msg_id = msg["id"]
-        filename, csv_bytes = download_csv_attachment(service, msg_id)
-        if csv_bytes is None:
-            print(f"[SKIP] Message {msg_id} — no CSV attachment found.")
-            continue
+    totals = dict(new_trades=0, dupe_trades=0, merge_trades=0,
+                  new_cash=0, dupe_cash=0, merge_cash=0,
+                  new_ctrn=0, dupe_ctrn=0,
+                  new_iacc=0, dupe_iacc=0,
+                  missing_trades=0, missing_cash=0, missing_ctrn=0, missing_iacc=0)
 
+    for label, csv_bytes in sources:
         print(f"{'─' * 60}")
-        print(f"  File   : {filename}")
-        print(f"  Msg ID : {msg_id}")
+        print(f"  Source : {label}")
 
         # ── STK trades ────────────────────────────────────────────────
-        stk_raw  = parse_ibkr_csv(csv_bytes)
-        trades   = transform(stk_raw)
+        trades = transform(parse_ibkr_csv(csv_bytes))
         print(f"\n  [STK] Parsed {len(trades)} stock EXECUTION row(s)")
-
         if trades:
-            incoming_ids = [r["trade_id"] for r in trades]
-            existing_ids = check_existing_trade_ids(client, incoming_ids)
-            new_count    = sum(1 for r in trades if r["trade_id"] not in existing_ids)
-            dupe_count   = len(trades) - new_count
+            existing = check_existing_trade_ids(client, [r["trade_id"] for r in trades])
+            manual   = _manual_hashes(client, "trades", trades)
+            dupe = sum(1 for r in trades if r["trade_id"] in existing)
+            merge = sum(1 for r in trades if r["trade_id"] not in existing
+                        and r.get("content_hash") in manual)
+            new  = len(trades) - dupe - merge
 
-            print_trade_table(trades, existing_ids)
-            upsert_to_supabase(client, trades)
+            print_trade_table(trades, existing, manual, dry_run)
+            totals["missing_trades"] += len(report_missing(trades, REQUIRED_TRADE, "STK data check"))
+            if not dry_run:
+                upsert_to_supabase(client, trades)
 
-            print(f"  ✔ Trades inserted : {new_count}")
-            if dupe_count:
-                print(f"  ↩ Trades skipped  : {dupe_count} duplicate(s)")
-
-            total_new_trades  += new_count
-            total_dupe_trades += dupe_count
+            added = [r for r in trades if r["trade_id"] not in existing
+                     and r.get("content_hash") not in manual]
+            verb = "would insert" if dry_run else "inserted"
+            print(f"  {'•' if dry_run else '✔'} Trades {verb} : {new}")
+            if merge: print(f"  ⤵ Trades merge into manual : {merge}")
+            if dupe:  print(f"  ↩ Trades duplicate (skip)  : {dupe}")
+            print_added("trade", added, dry_run)
+            totals["new_trades"] += new; totals["dupe_trades"] += dupe; totals["merge_trades"] += merge
         else:
             print("  No stock trades in this file.")
 
         # ── CASH / FX transactions ────────────────────────────────────
-        cash_raw   = parse_cash_csv(csv_bytes)
-        cash_recs  = transform_cash(cash_raw)
+        cash_recs = transform_cash(parse_cash_csv(csv_bytes))
         print(f"\n  [CASH] Parsed {len(cash_recs)} cash/FX EXECUTION row(s)")
-
         if cash_recs:
-            incoming_cids = [r["transaction_id"] for r in cash_recs]
-            existing_cids = check_existing_cash_ids(client, incoming_cids)
-            new_c   = sum(1 for r in cash_recs if r["transaction_id"] not in existing_cids)
-            dupe_c  = len(cash_recs) - new_c
+            existing = check_existing_cash_ids(client, [r["transaction_id"] for r in cash_recs])
+            manual   = _manual_hashes(client, "cash_transactions", cash_recs)
+            dupe = sum(1 for r in cash_recs if r["transaction_id"] in existing)
+            merge = sum(1 for r in cash_recs if r["transaction_id"] not in existing
+                        and r.get("content_hash") in manual)
+            new  = len(cash_recs) - dupe - merge
 
-            print_cash_table(cash_recs, existing_cids)
-            upsert_cash_to_supabase(client, cash_recs)
+            print_cash_table(cash_recs, existing, manual, dry_run)
+            totals["missing_cash"] += len(report_missing(cash_recs, REQUIRED_CASH, "CASH data check"))
+            if not dry_run:
+                upsert_cash_to_supabase(client, cash_recs)
 
-            print(f"  ✔ Cash inserted : {new_c}")
-            if dupe_c:
-                print(f"  ↩ Cash skipped  : {dupe_c} duplicate(s)")
-
-            total_new_cash  += new_c
-            total_dupe_cash += dupe_c
+            added = [r for r in cash_recs if r["transaction_id"] not in existing
+                     and r.get("content_hash") not in manual]
+            verb = "would insert" if dry_run else "inserted"
+            print(f"  {'•' if dry_run else '✔'} Cash {verb} : {new}")
+            if merge: print(f"  ⤵ Cash merge into manual : {merge}")
+            if dupe:  print(f"  ↩ Cash duplicate (skip)  : {dupe}")
+            print_added("cash", added, dry_run)
+            totals["new_cash"] += new; totals["dupe_cash"] += dupe; totals["merge_cash"] += merge
         else:
             print("  No cash/FX transactions in this file.")
 
         # ── CTRN account transactions (dividends, interest, tax, deposits) ──
-        ctrn_raw  = parse_ctrn_csv(csv_bytes)
-        ctrn_recs = transform_ctrn(ctrn_raw)
+        ctrn_recs = transform_ctrn(parse_ctrn_csv(csv_bytes))
         print(f"\n  [CTRN] Parsed {len(ctrn_recs)} account transaction row(s)")
-
         if ctrn_recs:
-            incoming_aids = [r["transaction_id"] for r in ctrn_recs]
-            existing_aids = check_existing_ctrn_ids(client, incoming_aids)
-            new_a  = sum(1 for r in ctrn_recs if r["transaction_id"] not in existing_aids)
-            dupe_a = len(ctrn_recs) - new_a
+            existing = check_existing_ctrn_ids(client, [r["transaction_id"] for r in ctrn_recs])
+            dupe = sum(1 for r in ctrn_recs if r["transaction_id"] in existing)
+            new  = len(ctrn_recs) - dupe
 
-            print_ctrn_table(ctrn_recs, existing_aids)
-            upsert_ctrn_to_supabase(client, ctrn_recs)
+            print_ctrn_table(ctrn_recs, existing, dry_run)
+            totals["missing_ctrn"] += len(report_missing(ctrn_recs, REQUIRED_CTRN, "CTRN data check"))
+            if not dry_run:
+                upsert_ctrn_to_supabase(client, ctrn_recs)
 
-            print(f"  ✔ Account txns inserted : {new_a}")
-            if dupe_a:
-                print(f"  ↩ Account txns skipped  : {dupe_a} duplicate(s)")
-
-            total_new_ctrn  += new_a
-            total_dupe_ctrn += dupe_a
+            added = [r for r in ctrn_recs if r["transaction_id"] not in existing]
+            verb = "would insert" if dry_run else "inserted"
+            print(f"  {'•' if dry_run else '✔'} Account txns {verb} : {new}")
+            if dupe: print(f"  ↩ Account txns duplicate (skip) : {dupe}")
+            print_added("account txn", added, dry_run)
+            totals["new_ctrn"] += new; totals["dupe_ctrn"] += dupe
         else:
             print("  No account transactions in this file.")
+
+        # ── IACC interest accruals (daily BASE_SUMMARY) ───────────────
+        iacc_recs = transform_iacc(parse_iacc_csv(csv_bytes))
+        print(f"\n  [IACC] Parsed {len(iacc_recs)} interest-accrual row(s)")
+        if iacc_recs:
+            existing = check_existing_iacc_ids(client, [r["accrual_id"] for r in iacc_recs])
+            dupe = sum(1 for r in iacc_recs if r["accrual_id"] in existing)
+            new  = len(iacc_recs) - dupe
+
+            print_iacc_table(iacc_recs, existing, dry_run)
+            totals["missing_iacc"] += len(report_missing(iacc_recs, REQUIRED_IACC, "IACC data check"))
+            if not dry_run:
+                upsert_iacc_to_supabase(client, iacc_recs)
+
+            added = [r for r in iacc_recs if r["accrual_id"] not in existing]
+            verb = "would insert" if dry_run else "inserted"
+            print(f"  {'•' if dry_run else '✔'} Interest accruals {verb} : {new}")
+            if dupe: print(f"  ↩ Interest accruals duplicate (skip) : {dupe}")
+            print_added("interest accrual", added, dry_run)
+            totals["new_iacc"] += new; totals["dupe_iacc"] += dupe
+        else:
+            print("  No interest accruals in this file.")
 
         print()
 
     print("=" * 60)
-    print("  SUMMARY")
-    print(f"  Files processed       : {len(messages)}")
-    print(f"  New stock trades      : {total_new_trades}")
-    print(f"  Duplicate trades      : {total_dupe_trades}")
-    print(f"  New cash/FX entries   : {total_new_cash}")
-    print(f"  Duplicate cash/FX     : {total_dupe_cash}")
-    print(f"  New account txns      : {total_new_ctrn}")
-    print(f"  Duplicate account txns: {total_dupe_ctrn}")
+    print("  DRY RUN SUMMARY" if dry_run else "  SUMMARY")
+    print(f"  Sources processed       : {len(sources)}")
+    print(f"  Stock trades   — new: {totals['new_trades']:>4}  merge: {totals['merge_trades']:>3}  dup: {totals['dupe_trades']:>4}")
+    print(f"  Cash / FX      — new: {totals['new_cash']:>4}  merge: {totals['merge_cash']:>3}  dup: {totals['dupe_cash']:>4}")
+    print(f"  Account txns   — new: {totals['new_ctrn']:>4}  {'':>10}  dup: {totals['dupe_ctrn']:>4}")
+    print(f"  Interest accr. — new: {totals['new_iacc']:>4}  {'':>10}  dup: {totals['dupe_iacc']:>4}")
+    miss = totals['missing_trades'] + totals['missing_cash'] + totals['missing_ctrn'] + totals['missing_iacc']
+    if miss:
+        print(f"  ⚠ Rows with missing data: trades={totals['missing_trades']} cash={totals['missing_cash']} "
+              f"ctrn={totals['missing_ctrn']} iacc={totals['missing_iacc']}")
+    else:
+        print("  ✓ Data completeness: all parsed rows have required fields")
+    if dry_run:
+        print("  (dry run — nothing was written)")
     print("=" * 60)
 
 
