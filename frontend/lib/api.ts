@@ -1,4 +1,8 @@
 import type {
+  AccountTransaction,
+  AccountTxnQuery,
+  AccountTxnSummary,
+  AccrualData,
   AnalyticsData,
   CashQuery,
   CashSummary,
@@ -105,6 +109,15 @@ export const api = {
 
   getTransactionsSummary: () =>
     request<TransactionsSummary>(`/api/v1/transactions/summary`),
+
+  getAccountTxns: (params: AccountTxnQuery) =>
+    request<Paginated<AccountTransaction>>(`/api/v1/account-transactions${qs({ ...params })}`),
+
+  getAccountTxnSummary: (range: Range) =>
+    request<AccountTxnSummary>(`/api/v1/account-transactions/summary${qs({ range })}`),
+
+  getInterestAccruals: (range: Range) =>
+    request<AccrualData>(`/api/v1/interest-accruals${qs({ range })}`),
 
   getAnalytics: (range: Range) =>
     request<AnalyticsData>(`/api/v1/metrics/analytics${qs({ range })}`),

@@ -250,6 +250,64 @@ export interface CashQuery {
   symbol?: string;
 }
 
+// ─── Account Transactions (IBKR CTRN: dividends, interest, tax, deposits) ──────
+
+export interface AccountTransaction {
+  transactionId: string;
+  datetime: string;
+  symbol: string | null;
+  description: string | null;
+  currency: string | null;
+  amount: number;
+  type: string | null;       // raw IBKR Type
+  category: string;          // normalized slug (dividend, interest_paid, ...)
+  categoryLabel: string;     // human label for `category`
+  source: TxnSource;
+}
+
+export interface AccountTxnQuery {
+  range?: Range;
+  cursor?: string | null;
+  limit?: number;
+  category?: string;
+  symbol?: string;
+}
+
+export interface AccountTxnCategoryStat {
+  category: string;
+  label: string;
+  currency: string;
+  count: number;
+  total: number;             // signed sum of amount in that currency
+}
+
+export interface AccountTxnSummary {
+  byCategory: AccountTxnCategoryStat[];
+  totalRows: number;
+}
+
+// ─── Interest accruals (IBKR IACC BASE_SUMMARY: daily accrued interest) ────────
+
+export interface AccrualPoint {
+  t: string;            // to_date (ISO date)
+  accrued: number;      // interest accrued that day
+  cumulative: number;   // running sum of accrued over the range
+  fx: number;           // FX translation that day
+}
+
+export interface AccrualSummary {
+  totalAccrued: number;     // sum of accrued in range
+  totalFx: number;          // sum of FX translation in range
+  dayCount: number;         // number of accrual days
+  avgDaily: number;         // totalAccrued / dayCount
+  latestDate: string | null;
+}
+
+export interface AccrualData {
+  series: AccrualPoint[];
+  summary: AccrualSummary;
+}
+
 // ─── Performance Report ───────────────────────────────────────────────────────
 
 export interface HoldingTimeStats {
