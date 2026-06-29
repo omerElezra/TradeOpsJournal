@@ -94,46 +94,108 @@ def download_csv_attachment(service, message_id):
     return None, None
 
 
-def parse_ibkr_csv(csv_bytes):
-    """
-    Parse an IBKR Flex Query Daily Activity CSV.
+import csv as _csv
 
-    The file contains multiple sections with different schemas concatenated.
-    We read only the first section (trades) using the first header row,
-    then filter to EXECUTION rows for stocks.
-    """
-    # Try common encodings — IBKR CSVs sometimes use latin-1
+
+def _decode_csv(csv_bytes):
+    """Decode raw CSV bytes, trying the encodings IBKR is known to use."""
     for encoding in ("utf-8", "latin-1", "cp1252"):
         try:
             csv_bytes.seek(0)
-            raw = pd.read_csv(
-                csv_bytes,
-                header=0,
-                dtype=str,
-                on_bad_lines="skip",
-                encoding=encoding,
-            )
-            break
+            return csv_bytes.read().decode(encoding)
         except UnicodeDecodeError:
             continue
+    csv_bytes.seek(0)
+    return csv_bytes.read().decode("utf-8", errors="replace")
 
-    # Keep only the trade section columns (first header row defines them)
-    # The file has extra header rows mid-file for other sections — drop them
-    # by requiring the EXECUTION LevelOfDetail value
-    if "LevelOfDetail" not in raw.columns:
-        print("  Unexpected CSV format — LevelOfDetail column not found.")
-        print(f"  Columns found: {list(raw.columns)}")
+
+def extract_section(csv_bytes, section_code):
+    """
+    Parse a multi-section IBKR Flex CSV and return one section's DATA rows as a
+    DataFrame, using that section's HEADER row to name the columns.
+
+    Every line in the new template looks like:
+        "HEADER","TRNT","ClientAccountID","CurrencyPrimary",...   ← column names
+        "DATA","TRNT","U21588075","USD",...                       ← values
+    Field 0 is the record type (HEADER/DATA), field 1 is the section code
+    (TRNT, CRTT, CTRN, IACC, ...). We keep only rows for `section_code`, take
+    column names from its HEADER row, and align DATA rows to them.
+
+    Returns an empty DataFrame if the section is absent (e.g. a legacy export).
+    """
+    text   = _decode_csv(csv_bytes)
+    reader = _csv.reader(io.StringIO(text))
+    header = None
+    rows   = []
+
+    for fields in reader:
+        if len(fields) < 2:
+            continue
+        rectype, section = fields[0].strip(), fields[1].strip()
+        if section != section_code:
+            continue
+        if rectype == "HEADER":
+            header = [c.strip() for c in fields[2:]]
+        elif rectype == "DATA" and header is not None:
+            values = fields[2:]
+            # Pad short / truncate long rows so they line up with the header
+            if len(values) < len(header):
+                values += [""] * (len(header) - len(values))
+            rows.append(values[: len(header)])
+
+    if header is None or not rows:
         return pd.DataFrame()
 
-    executions = raw[
-        (raw["LevelOfDetail"].str.strip() == "EXECUTION") &
-        (raw["AssetClass"].str.strip() == "STK")
+    return pd.DataFrame(rows, columns=header, dtype=str)
+
+
+def _read_flat(csv_bytes):
+    """
+    Legacy single-section parser: treat row 0 as the column header.
+
+    Kept as a fallback so historical (pre-template-change) emails still ingest
+    during backfills. New exports use the multi-section format handled above.
+    """
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            csv_bytes.seek(0)
+            return pd.read_csv(
+                csv_bytes, header=0, dtype=str,
+                on_bad_lines="skip", encoding=encoding,
+            )
+        except UnicodeDecodeError:
+            continue
+    return pd.DataFrame()
+
+
+def _read_executions(csv_bytes, asset_class):
+    """
+    Return EXECUTION rows for the given AssetClass from the TRNT section.
+
+    Prefers the new multi-section template; falls back to the legacy flat
+    layout when no TRNT section is present.
+    """
+    section = extract_section(csv_bytes, "TRNT")
+    if section.empty:
+        section = _read_flat(csv_bytes)
+
+    if "LevelOfDetail" not in section.columns or "AssetClass" not in section.columns:
+        if asset_class == "STK":
+            print("  Unexpected CSV format — LevelOfDetail/AssetClass not found.")
+            print(f"  Columns found: {list(section.columns)}")
+        return pd.DataFrame()
+
+    return section[
+        (section["LevelOfDetail"].str.strip() == "EXECUTION") &
+        (section["AssetClass"].str.strip() == asset_class)
     ].copy()
 
+
+def parse_ibkr_csv(csv_bytes):
+    """Extract STK EXECUTION rows (stock trades) from the Flex export."""
+    executions = _read_executions(csv_bytes, "STK")
     if executions.empty:
         print("  No EXECUTION rows found for STK.")
-        return pd.DataFrame()
-
     return executions
 
 
@@ -233,30 +295,11 @@ def parse_cash_csv(csv_bytes):
     """
     Extract CASH asset class EXECUTION rows (currency conversions & FX deposits).
 
-    These rows share the same first-section header as STK trades but have
-    AssetClass == 'CASH'.  Examples: USD.ILS, ILS.USD conversions when
+    These live in the same TRNT section as STK trades but have
+    AssetClass == 'CASH'. Examples: USD.ILS, ILS.USD conversions when
     depositing or withdrawing local-currency funds.
     """
-    for encoding in ("utf-8", "latin-1", "cp1252"):
-        try:
-            csv_bytes.seek(0)
-            raw = pd.read_csv(
-                csv_bytes, header=0, dtype=str,
-                on_bad_lines="skip", encoding=encoding,
-            )
-            break
-        except UnicodeDecodeError:
-            continue
-
-    if "LevelOfDetail" not in raw.columns:
-        return pd.DataFrame()
-
-    cash = raw[
-        (raw["LevelOfDetail"].str.strip() == "EXECUTION") &
-        (raw["AssetClass"].str.strip() == "CASH")
-    ].copy()
-
-    return cash
+    return _read_executions(csv_bytes, "CASH")
 
 
 def transform_cash(cash_rows):
@@ -390,6 +433,127 @@ def print_cash_table(records, existing_ids):
         print(
             f"  {i:<4} {order_t:<20} {r['symbol']:<12} {r.get('action',''):<5} "
             f"{qty:>10.4f} {rate:>10.6f} {net:>+10.2f}  {status}"
+        )
+    print()
+
+
+# ── Account transactions (CTRN: dividends, interest, tax, deposits) ─────────────
+
+# Raw IBKR "Type" → normalized category slug. The UI groups/summarizes by these.
+CTRN_CATEGORY = {
+    "dividends":                 "dividend",
+    "payment in lieu of dividends": "dividend",
+    "withholding tax":           "withholding_tax",
+    "broker interest paid":      "interest_paid",
+    "broker interest received":  "interest_received",
+    "deposits/withdrawals":      "deposit_withdrawal",
+    "other fees":                "fee",
+    "commission adjustments":    "fee",
+}
+
+
+def categorize_ctrn(raw_type):
+    """Normalize an IBKR CTRN Type to a stable category slug (else 'other')."""
+    return CTRN_CATEGORY.get((raw_type or "").strip().lower(), "other")
+
+
+def parse_ctrn_dt(series):
+    """
+    Parse a CTRN Date/Time value. Unlike trades, CTRN mixes two shapes:
+      - "03/12/2026,20:20:00"  (dividends/interest — date + time)
+      - "03/30/2026"           (deposits — date only)
+    Also tolerates a trailing timezone suffix. Returns a datetime Series.
+    """
+    cleaned = series.str.strip().str.replace(_TZ_SUFFIX, "", regex=True)
+    dt = pd.to_datetime(cleaned, format="%m/%d/%Y,%H:%M:%S", errors="coerce")
+    missing = dt.isna()
+    if missing.any():
+        dt[missing] = pd.to_datetime(
+            cleaned[missing], format="%m/%d/%Y", errors="coerce"
+        )
+    return dt
+
+
+def parse_ctrn_csv(csv_bytes):
+    """Extract the CTRN section (account-level cash transactions)."""
+    return extract_section(csv_bytes, "CTRN")
+
+
+def transform_ctrn(rows):
+    """Map CTRN rows → account_transactions schema, keyed on IBKR TransactionID."""
+    if rows.empty:
+        return []
+
+    def col(name):
+        return rows[name].str.strip() if name in rows.columns else pd.Series(
+            [""] * len(rows), index=rows.index
+        )
+
+    df = pd.DataFrame(index=rows.index)
+    df["account_id"]  = col("ClientAccountID")
+    df["currency"]    = col("CurrencyPrimary")
+    df["symbol"]      = col("Symbol")
+    df["description"] = col("Description")
+    df["type"]        = col("Type")
+    df["category"]    = df["type"].map(categorize_ctrn)
+
+    dt = parse_ctrn_dt(col("Date/Time"))
+    df["datetime"]         = dt.dt.strftime("%Y-%m-%dT%H:%M:%S")
+    df["transaction_date"] = dt.dt.date.astype(str)
+
+    df["amount"]      = pd.to_numeric(col("Amount"), errors="coerce")
+    df["ibkr_txn_id"] = col("TransactionID")
+
+    df.dropna(subset=["amount"], inplace=True)
+    df = df[df["datetime"].notna() & (df["transaction_date"] != "NaT")]
+    df.sort_values("datetime", inplace=True)
+
+    def make_ctrn_id(row):
+        tid = str(row.get("ibkr_txn_id") or "").strip()
+        if tid:
+            return f"ctrn_{tid}"
+        key = f"ctrn|{row['datetime']}|{row['type']}|{row['amount']}"
+        return "ctrn_" + hashlib.sha256(key.encode()).hexdigest()[:28]
+
+    df["transaction_id"] = df.apply(make_ctrn_id, axis=1)
+    df["source"]         = "ibkr"
+    df.drop(columns=["ibkr_txn_id"], inplace=True)
+
+    return df.to_dict(orient="records")
+
+
+def check_existing_ctrn_ids(client, ids):
+    if not ids:
+        return set()
+    res = (
+        client.table("account_transactions")
+        .select("transaction_id")
+        .in_("transaction_id", ids)
+        .execute()
+    )
+    return {row["transaction_id"] for row in res.data}
+
+
+def upsert_ctrn_to_supabase(client, records):
+    if not records:
+        return 0
+    client.table("account_transactions").upsert(
+        sanitize_records(records), on_conflict="transaction_id"
+    ).execute()
+    return len(records)
+
+
+def print_ctrn_table(records, existing_ids):
+    print()
+    print(f"  {'#':<4} {'DateTime':<20} {'Category':<18} {'Symbol':<8} {'Amount':>12} {'Status'}")
+    print("  " + "-" * 80)
+    for i, r in enumerate(records, 1):
+        status = "DUPLICATE (skip)" if r["transaction_id"] in existing_ids else "NEW → inserted"
+        when   = str(r.get("datetime") or r.get("transaction_date") or "")[:19].replace("T", " ")
+        amt    = r.get("amount") or 0
+        print(
+            f"  {i:<4} {when:<20} {r.get('category',''):<18} {(r.get('symbol') or ''):<8} "
+            f"{amt:>+12.2f}  {status}"
         )
     print()
 
@@ -555,6 +719,8 @@ def main():
     total_dupe_trades = 0
     total_new_cash = 0
     total_dupe_cash = 0
+    total_new_ctrn = 0
+    total_dupe_ctrn = 0
 
     for msg in messages:
         msg_id = msg["id"]
@@ -613,6 +779,29 @@ def main():
         else:
             print("  No cash/FX transactions in this file.")
 
+        # ── CTRN account transactions (dividends, interest, tax, deposits) ──
+        ctrn_raw  = parse_ctrn_csv(csv_bytes)
+        ctrn_recs = transform_ctrn(ctrn_raw)
+        print(f"\n  [CTRN] Parsed {len(ctrn_recs)} account transaction row(s)")
+
+        if ctrn_recs:
+            incoming_aids = [r["transaction_id"] for r in ctrn_recs]
+            existing_aids = check_existing_ctrn_ids(client, incoming_aids)
+            new_a  = sum(1 for r in ctrn_recs if r["transaction_id"] not in existing_aids)
+            dupe_a = len(ctrn_recs) - new_a
+
+            print_ctrn_table(ctrn_recs, existing_aids)
+            upsert_ctrn_to_supabase(client, ctrn_recs)
+
+            print(f"  ✔ Account txns inserted : {new_a}")
+            if dupe_a:
+                print(f"  ↩ Account txns skipped  : {dupe_a} duplicate(s)")
+
+            total_new_ctrn  += new_a
+            total_dupe_ctrn += dupe_a
+        else:
+            print("  No account transactions in this file.")
+
         print()
 
     print("=" * 60)
@@ -622,6 +811,8 @@ def main():
     print(f"  Duplicate trades      : {total_dupe_trades}")
     print(f"  New cash/FX entries   : {total_new_cash}")
     print(f"  Duplicate cash/FX     : {total_dupe_cash}")
+    print(f"  New account txns      : {total_new_ctrn}")
+    print(f"  Duplicate account txns: {total_dupe_ctrn}")
     print("=" * 60)
 
 
