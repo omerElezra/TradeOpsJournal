@@ -250,6 +250,42 @@ export interface CashQuery {
   symbol?: string;
 }
 
+// ─── Account Transactions (IBKR CTRN: dividends, interest, tax, deposits) ──────
+
+export interface AccountTransaction {
+  transactionId: string;
+  datetime: string;
+  symbol: string | null;
+  description: string | null;
+  currency: string | null;
+  amount: number;
+  type: string | null;       // raw IBKR Type
+  category: string;          // normalized slug (dividend, interest_paid, ...)
+  categoryLabel: string;     // human label for `category`
+  source: TxnSource;
+}
+
+export interface AccountTxnQuery {
+  range?: Range;
+  cursor?: string | null;
+  limit?: number;
+  category?: string;
+  symbol?: string;
+}
+
+export interface AccountTxnCategoryStat {
+  category: string;
+  label: string;
+  currency: string;
+  count: number;
+  total: number;             // signed sum of amount in that currency
+}
+
+export interface AccountTxnSummary {
+  byCategory: AccountTxnCategoryStat[];
+  totalRows: number;
+}
+
 // ─── Performance Report ───────────────────────────────────────────────────────
 
 export interface HoldingTimeStats {

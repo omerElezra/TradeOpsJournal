@@ -11,6 +11,7 @@ import {
   Settings,
   Receipt,
   Banknote,
+  Landmark,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/trades", label: "Trades", icon: CandlestickChart },
   { href: "/transactions", label: "Transactions", icon: Receipt },
   { href: "/cash", label: "Cash", icon: Banknote },
+  { href: "/account-transactions", label: "Account Activity", icon: Landmark },
   { href: "/analytics", label: "Analytics", icon: LineChart },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/insights", label: "AI Insights", icon: Sparkles },
