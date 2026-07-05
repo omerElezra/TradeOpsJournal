@@ -12,6 +12,7 @@ import type {
   ExecutionQuery,
   Insight,
   JournalEntry,
+  JournalListItem,
   ManualCashInput,
   ManualInsertResult,
   ManualTradeInput,
@@ -69,6 +70,9 @@ export const api = {
 
   getInsights: (range: Range) =>
     request<Insight[]>(`/api/v1/insights${qs({ range })}`),
+
+  getJournal: (range: Range) =>
+    request<JournalListItem[]>(`/api/v1/journal${qs({ range })}`),
 
   upsertJournal: (body: Omit<JournalEntry, "id" | "updatedAt">) =>
     request<JournalEntry>(`/api/v1/journal`, {

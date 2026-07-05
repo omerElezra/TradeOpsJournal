@@ -55,7 +55,8 @@ Deployed to Vercel. No Docker, no separate backend.
 | `GET /api/v1/executions` | Raw execution fills (paginated) |
 | `GET /api/v1/cash` | Cash transactions (paginated) |
 | `GET /api/v1/cash/summary` | Cash summary metrics |
-| `POST /api/v1/journal` | Upsert journal entry for a trade |
+| `GET /api/v1/journal` | List journaled trades in a range (stats + journal merged) |
+| `POST /api/v1/journal` | Upsert journal entry for a trade; snapshots `group_id`/`execution_ids` |
 | `GET /api/v1/insights` | AI insights (stub — returns empty for now) |
 
 **Server-only domain logic** (`frontend/lib/domain/`):
@@ -68,6 +69,14 @@ Deployed to Vercel. No Docker, no separate backend.
 | `models.ts` | Internal TypeScript types for domain objects |
 
 All `lib/domain/` files are marked `import "server-only"` — they never run in the browser.
+
+**Query layer** (`frontend/lib/queries/trades.ts`):
+
+Bridges Supabase rows and the grouped-trade domain model. Notably:
+
+- `loadGroups()` — fetches executions + the journal map for a range and runs `groupExecutions()`.
+- `journalDto()` — maps a `trade_journal` row to the camelCase API shape; shared by the trade detail route and the journal list route so the two stay in sync.
+- `computeGroupSnapshot()` — re-runs grouping for one `(symbol, entry_time)` to produce the `group_id`/`execution_ids` snapshot stored on save (see [`DATA_MODEL.md`](DATA_MODEL.md#linking-a-journal-to-its-trades)).
 
 **Supabase client** (`frontend/lib/supabase/server.ts`):
 

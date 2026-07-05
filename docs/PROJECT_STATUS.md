@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** June 2026
+**Last updated:** July 2026
 
 ## Current State
 
@@ -58,16 +58,17 @@ All routes under `/api/v1/`:
 | `GET /executions` | Working — paginated raw fills |
 | `GET /cash` | Working — paginated cash transactions |
 | `GET /cash/summary` | Working |
-| `POST /journal` | Working — upserts journal entry |
+| `GET /journal` | Working — lists journaled trades in a range (stats + journal merged) |
+| `POST /journal` | Working — upserts journal entry; snapshots `group_id`/`execution_ids` |
 | `GET /insights` | Stub — returns empty array |
 
 ### UI
 
 - Dashboard with KPI row and equity curve card.
 - Trade table with sort and filter controls.
-- Trade detail page with execution breakdown.
+- Trade detail page with execution breakdown and an inline trade journal form (checklist, planning, execution/psychology, review — all click-based with "Other…" free text on every choice field).
+- Journal page — table of every journaled trade with expandable rows showing all inputs, linked back to the trade.
 - Cash / transactions page.
-- Journal entry editing per trade.
 - PWA manifest — installable to phone home screen via "Add to Home Screen".
 - Dark theme, responsive layout.
 
@@ -78,7 +79,7 @@ All routes under `/api/v1/`:
 | Authentication | Not implemented. App is unprotected — keep URL private or use Vercel password protection. |
 | Equity curve chart | `EquityCurveCard` renders placeholder — Recharts not yet installed. |
 | AI insights | `/api/v1/insights` returns empty array. No AI backend exists yet. |
-| Journal UI completeness | Basic journal fields work; full review flow (screenshots, post-trade analysis) not built. |
+| Journal UI completeness | Full trade-level journal (checklist, planning, execution/psychology, review) works via `POST /api/v1/journal` and the `/journal` list page. Journaling is intentionally trade-level only, not per-execution — a deliberate zero-friction tradeoff. Screenshot attachments and pre-trade-plan-vs-actual comparison not built. `ai_coaching_question`/`ai_conversation` columns exist but are not yet wired to an AI backend. |
 | PWA icons | `public/icons/icon-192.png` and `icon-512.png` placeholder paths referenced in manifest — actual icon files not yet added. |
 | Short selling | Trade grouping assumes long trades. Shorts may not group correctly. |
 | Options / multi-leg | Not supported in grouping or metrics. |

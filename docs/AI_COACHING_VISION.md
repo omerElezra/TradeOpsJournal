@@ -18,32 +18,31 @@ The coach should not be positioned as a guaranteed profit engine or automated tr
 
 ### Current Inputs
 
-- Symbol
-- Buy/sell action
-- Quantity
-- Price
-- Execution time
-- Realized P&L
-- Commission
-- Full-trade grouping
-- Holding duration
+**Quantitative** (from `trades`, via `groupExecutions()`):
+- Symbol, buy/sell action, quantity, price, execution time
+- Realized P&L, commission
+- Full-trade (round-trip) grouping, holding duration
 - Daily and symbol-level P&L
+
+**Qualitative** (from `trade_journal`, shipped — see `docs/DATA_MODEL.md`):
+- Pre-entry checklist: candle pattern, recent trend, volume vs. trend, MA relation, gaps, support/resistance/Fibonacci
+- Plan: setup type, planned stop/target, risk amount, conviction level (1–10)
+- Entry reason, exit reason, emotion tags during the trade
+- Review: trade score (1–10), mistake tags, free-text notes
+
+A journal row can be joined to its exact fills via `group_id`/`execution_ids`
+(see [`DATA_MODEL.md`](DATA_MODEL.md#linking-a-journal-to-its-trades)), so the
+AI can receive both the numbers and the trader's own account of the trade in
+one query — no app-side recomputation needed.
+
+`trade_journal.ai_coaching_question` and `.ai_conversation` (JSONB) columns
+already exist, reserved for this feature, but nothing reads or writes them yet.
 
 ### Future Inputs
 
-- Pre-trade plan
-- Trade thesis
-- Entry reason
-- Stop-loss and target plan
-- Position sizing logic
-- Emotion before entry
-- Emotion during management
-- Exit reason
-- Screenshots
-- Setup tags
-- Mistake tags
+- Screenshots / chart attachments
 - Market context
-- User rules and playbook
+- User-defined rules and playbook
 
 ## AI Outputs
 

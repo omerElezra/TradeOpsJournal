@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PnLCell, ResultBadge, SideBadge } from "@/components/table/cells";
+import { TradeJournalForm } from "@/components/journal/trade-journal-form";
 import { useTrade } from "@/hooks/use-trades";
 import {
   formatDateTime,
@@ -76,6 +77,8 @@ export default function TradeDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      <TradeJournalForm key={data.id} trade={data} />
 
       <Card>
         <CardHeader>

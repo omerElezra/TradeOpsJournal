@@ -42,12 +42,12 @@ When enough journal entries exist:
 
 ## 5. Journal UI Completeness
 
-**Status:** Basic fields (setup, psych tags, notes, risk amount) work via `POST /api/v1/journal`.
+**Status:** Full trade-level journal shipped — pre-entry checklist, planning/conviction, entry/exit reasons, emotions, mistakes, and trade score all work via `POST /api/v1/journal`, editable on the trade detail page and browsable on the `/journal` list page. Journaling stays trade-level by design (no per-execution entry) to keep it fast for the common single-entry/single-exit trade.
 
 Still missing from the UI:
-- Post-trade review form with structured fields.
 - Screenshot / chart attachment upload.
-- Pre-trade plan vs actual comparison.
+- Pre-trade plan vs actual comparison (e.g. planned stop/target vs realized exit).
+- AI coaching loop — `ai_coaching_question`/`ai_conversation` columns exist on `trade_journal` but nothing writes or reads them yet. See `docs/AI_COACHING_VISION.md`.
 
 ## 6. Analytics Pages
 

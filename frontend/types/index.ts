@@ -97,13 +97,48 @@ export interface JournalEntry {
   id?: number;
   symbol: string;
   entryTime: string;
+  /** Snapshot of the computed round-trip group (refreshed on each save). */
+  groupId?: string | null;
+  executionIds?: string[];
+  // Pre-entry checklist
+  candlePattern: string | null;
+  recentTrend: string | null;
+  volumeVsTrend: string | null;
+  maRelation: string[];
+  openGaps: string[];
+  supportResFib: string[];
+  // Planning & setup
   setup: string | null;
-  psychTags: string[];
-  notes: string;
   plannedStop: number | null;
   plannedTarget: number | null;
   riskAmount: number | null;
+  convictionLevel: number | null;
+  // Execution & psychology
+  entryReason: string | null;
+  exitReason: string | null;
+  psychTags: string[];
+  // Review
+  tradeScore: number | null;
+  mistakesTags: string[];
+  notes: string;
+  // AI coaching
+  aiCoachingQuestion: string | null;
   updatedAt?: string;
+}
+
+/** A journaled trade: round-trip stats merged with the journal inputs. */
+export interface JournalListItem {
+  tradeId: string;
+  symbol: string;
+  side: Side;
+  status: TradeStatus;
+  result: TradeResult;
+  entryTime: string;
+  exitTime: string | null;
+  netPnl: number;
+  returnPct: number;
+  currency: string;
+  journal: JournalEntry;
 }
 
 export interface TradeGroupDetail extends TradeGroup {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveRange } from "@/lib/domain/ranges";
-import { loadGroups, journalKey } from "@/lib/queries/trades";
+import { loadGroups, journalKey, journalDto } from "@/lib/queries/trades";
 import { rMultiple } from "@/lib/domain/metrics";
 import type { GroupedTrade } from "@/lib/domain/models";
 
@@ -43,20 +43,7 @@ function toDetail(g: GroupedTrade, journal: Map<string, Record<string, unknown>>
       side: e.action,
       qty: e.quantity,
     })),
-    journal: jrow
-      ? {
-          id: jrow.id,
-          symbol: String(jrow.symbol),
-          entryTime: String(jrow.entry_time),
-          setup: (jrow.setup as string | null) ?? null,
-          psychTags: ((jrow.psych_tags as string[] | null) ?? []),
-          notes: String(jrow.notes ?? ""),
-          plannedStop: jrow.planned_stop != null ? Number(jrow.planned_stop) : null,
-          plannedTarget: jrow.planned_target != null ? Number(jrow.planned_target) : null,
-          riskAmount: jrow.risk_amount != null ? Number(jrow.risk_amount) : null,
-          updatedAt: jrow.updated_at ? String(jrow.updated_at) : undefined,
-        }
-      : null,
+    journal: jrow ? journalDto(jrow) : null,
   };
 }
 
