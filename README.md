@@ -115,8 +115,10 @@ Run these migrations in the Supabase SQL editor:
 
 ```bash
 # Apply via script (uses SUPABASE_URL + SUPABASE_ACCESS_TOKEN env vars)
-python scripts/run_migration.py scripts/migrations/001_trade_journal.sql
-python scripts/run_migration.py scripts/migrations/002_journal_risk_fields.sql
+# Run migrations in order — see scripts/migrations/ for the full list.
+for f in scripts/migrations/*.sql; do
+  python scripts/run_migration.py "$f"
+done
 ```
 
 Or paste the SQL files directly in the Supabase dashboard. See [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) for the full schema.

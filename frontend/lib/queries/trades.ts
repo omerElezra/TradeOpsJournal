@@ -105,6 +105,75 @@ export async function fetchJournalMap(
   return map;
 }
 
+function strOrNull(v: unknown): string | null {
+  return v != null && String(v).trim() !== "" ? String(v) : null;
+}
+
+function numOrNull(v: unknown): number | null {
+  return v != null ? Number(v) : null;
+}
+
+function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(String) : [];
+}
+
+/** Map a trade_journal row to the camelCase JournalEntry DTO. */
+export function journalDto(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    symbol: String(row.symbol),
+    entryTime: String(row.entry_time),
+    groupId: strOrNull(row.group_id),
+    executionIds: strArray(row.execution_ids),
+    candlePattern: strOrNull(row.candle_pattern),
+    recentTrend: strOrNull(row.recent_trend),
+    volumeVsTrend: strOrNull(row.volume_vs_trend),
+    maRelation: strArray(row.ma_relation),
+    openGaps: strArray(row.open_gaps),
+    supportResFib: strArray(row.support_res_fib),
+    setup: strOrNull(row.setup),
+    plannedStop: numOrNull(row.planned_stop),
+    plannedTarget: numOrNull(row.planned_target),
+    riskAmount: numOrNull(row.risk_amount),
+    convictionLevel: numOrNull(row.conviction_level),
+    entryReason: strOrNull(row.entry_reason),
+    exitReason: strOrNull(row.exit_reason),
+    psychTags: strArray(row.psych_tags),
+    tradeScore: numOrNull(row.trade_score),
+    mistakesTags: strArray(row.mistakes_tags),
+    notes: String(row.notes ?? ""),
+    aiCoachingQuestion: strOrNull(row.ai_coaching_question),
+    updatedAt: row.updated_at ? String(row.updated_at) : undefined,
+  };
+}
+
+/**
+ * Recompute the round-trip group for (symbol, entryTime) and return its id and
+ * member execution trade_ids. Stored on the journal row at save time so SQL can
+ * join a journal straight to its fills without re-running grouping.
+ */
+export async function computeGroupSnapshot(
+  symbol: string,
+  entryTime: string,
+): Promise<{ group_id: string; execution_ids: string[] } | null> {
+  const db = getSupabaseAdmin();
+  const { data, error } = await db
+    .from("trades")
+    .select(
+      "trade_id, exec_time, symbol, action, quantity, price, proceeds, commission, realized_pnl, currency",
+    )
+    .eq("symbol", symbol)
+    .order("exec_time");
+  if (error) throw new Error(`computeGroupSnapshot: ${error.message}`);
+
+  const groups = groupExecutions(((data ?? []) as Record<string, unknown>[]).map(toRawExecution));
+  const key = journalKey(symbol, new Date(entryTime));
+  const g = groups.find((g) => journalKey(g.symbol, g.entryTime) === key);
+  return g
+    ? { group_id: g.id, execution_ids: g.executions.map((e) => e.tradeId) }
+    : null;
+}
+
 export async function upsertJournal(
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
