@@ -572,14 +572,24 @@ def transform_ctrn(rows):
     df = df[df["datetime"].notna() & (df["transaction_date"] != "NaT")]
     df.sort_values("datetime", inplace=True)
 
+    # IBKR occasionally reuses one TransactionID across rows of different Type
+    # in the same statement (e.g. borrow fees + SYEP interest posted together).
+    # Only trust the tid as a dedup key when it is unique within this file;
+    # colliding rows fall back to a content hash that includes the tid.
+    tid_counts = df["ibkr_txn_id"].value_counts()
+
     def make_ctrn_id(row):
         tid = str(row.get("ibkr_txn_id") or "").strip()
-        if tid:
+        if tid and tid_counts.get(tid, 0) == 1:
             return f"ctrn_{tid}"
-        key = f"ctrn|{row['datetime']}|{row['type']}|{row['amount']}"
+        key = f"ctrn|{tid}|{row['datetime']}|{row['type']}|{row['amount']}" if tid \
+            else f"ctrn|{row['datetime']}|{row['type']}|{row['amount']}"
         return "ctrn_" + hashlib.sha256(key.encode()).hexdigest()[:28]
 
     df["transaction_id"] = df.apply(make_ctrn_id, axis=1)
+    # Guard: a batch must never contain the same key twice, or the upsert
+    # fails with "ON CONFLICT DO UPDATE command cannot affect row a second time".
+    df.drop_duplicates(subset="transaction_id", keep="first", inplace=True)
     df["source"]         = "ibkr"
     df.drop(columns=["ibkr_txn_id"], inplace=True)
 
