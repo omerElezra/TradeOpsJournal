@@ -4,6 +4,8 @@ import type {
   AccountTxnSummary,
   AccrualData,
   AnalyticsData,
+  CandleQuery,
+  CandlesResponse,
   CashQuery,
   CashSummary,
   CashTransaction,
@@ -125,4 +127,7 @@ export const api = {
 
   getAnalytics: (range: Range) =>
     request<AnalyticsData>(`/api/v1/metrics/analytics${qs({ range })}`),
+
+  getCandles: (params: CandleQuery) =>
+    request<CandlesResponse>(`/api/v1/candles${qs({ ...params })}`),
 };

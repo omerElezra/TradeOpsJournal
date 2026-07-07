@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { CandlestickChart } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -19,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PnLCell, ResultBadge, SideBadge } from "@/components/table/cells";
 import { TradeJournalForm } from "@/components/journal/trade-journal-form";
+import { TradePriceChart } from "@/components/charts/trade-price-chart";
 import { useTrade } from "@/hooks/use-trades";
 import {
   formatDateTime,
@@ -58,25 +58,7 @@ export default function TradeDetailPage() {
         <Stat label="R-Multiple" value={data.rMultiple != null ? `${data.rMultiple}R` : "—"} />
       </div>
 
-      {/* Chart placeholder with buy/sell marker slot */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-foreground">Price & Executions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex h-[320px] items-center justify-center rounded-md border border-dashed border-border bg-background/40">
-            <div className="flex flex-col items-center gap-2 text-muted-foreground">
-              <CandlestickChart className="h-6 w-6" />
-              <span className="text-sm">
-                {data.markers.length} buy/sell markers ready
-              </span>
-              <span className="text-xs">
-                TradingView chart with entry/exit points renders here
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <TradePriceChart key={data.id} trade={data} />
 
       <TradeJournalForm key={data.id} trade={data} />
 

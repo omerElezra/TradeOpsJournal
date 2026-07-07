@@ -417,3 +417,28 @@ export interface AnalyticsData {
   bySymbol: SymbolPerformance[];
   byMonth: MonthlyPerformance[];
 }
+
+/** Chart candle intervals supported by the candles API. */
+export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "1d";
+
+export interface Candle {
+  time: number; // unix seconds (UTC)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+
+export interface CandleQuery {
+  symbol: string;
+  interval: CandleInterval;
+  from: number; // unix seconds
+  to: number;   // unix seconds
+}
+
+export interface CandlesResponse {
+  symbol: string;
+  interval: CandleInterval;
+  candles: Candle[];
+}
