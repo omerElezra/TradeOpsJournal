@@ -27,6 +27,7 @@ import type {
   TradeQuery,
   TransactionsSummary,
 } from "@/types";
+import type { EnrichmentRow } from "@/lib/domain/enrichment";
 
 // Empty BASE → all requests go to the same Next.js origin (relative URLs).
 // The FastAPI backend is no longer used — routes live under /api/v1/*.
@@ -130,4 +131,23 @@ export const api = {
 
   getCandles: (params: CandleQuery) =>
     request<CandlesResponse>(`/api/v1/candles${qs({ ...params })}`),
+
+  /** Stored trade context enrichment; null when never computed. */
+  getTradeEnrichment: async (tradeId: string): Promise<EnrichmentRow | null> => {
+    const res = await fetch(
+      `${BASE}/api/v1/trades/${encodeURIComponent(tradeId)}/enrichment`,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => res.statusText);
+      throw new Error(`API ${res.status}: ${detail}`);
+    }
+    return res.json() as Promise<EnrichmentRow>;
+  },
+
+  computeTradeEnrichment: (tradeId: string) =>
+    request<EnrichmentRow>(
+      `/api/v1/trades/${encodeURIComponent(tradeId)}/enrichment`,
+      { method: "POST" },
+    ),
 };

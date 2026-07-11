@@ -16,4 +16,5 @@ export const qk = {
   interestAccruals: (range: Range) => ["interestAccruals", range] as const,
   analytics: (range: Range) => ["analytics", range] as const,
   candles: (params: CandleQuery) => ["candles", params] as const,
+  enrichment: (tradeId: string) => ["enrichment", tradeId] as const,
 };
