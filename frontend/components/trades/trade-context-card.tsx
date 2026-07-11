@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useComputeEnrichment, useEnrichment } from "@/hooks/use-enrichment";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/format";
-import type { TradeContextEnrichment, Trend } from "@/lib/domain/enrichment";
+import type { TradeContextEnrichment, Trend, VixRegime } from "@/lib/domain/enrichment";
 import type { TradeGroupDetail } from "@/types";
 
 const TREND_CLS: Record<Trend, string> = {
@@ -23,6 +23,24 @@ function TrendBadge({ trend }: { trend: Trend }) {
       className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${TREND_CLS[trend]}`}
     >
       {trend}
+    </span>
+  );
+}
+
+const VIX_CLS: Record<VixRegime, string> = {
+  LOW: "border-positive/50 bg-positive/10 text-positive",
+  NORMAL: "border-border bg-accent text-foreground",
+  ELEVATED: "border-negative/40 bg-negative/5 text-foreground",
+  EXTREME: "border-negative/50 bg-negative/10 text-negative",
+  UNKNOWN: "border-border bg-background text-muted-foreground",
+};
+
+function VixBadge({ regime }: { regime: VixRegime }) {
+  return (
+    <span
+      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${VIX_CLS[regime]}`}
+    >
+      {regime}
     </span>
   );
 }
@@ -83,13 +101,13 @@ function EnrichmentBody({ e }: { e: TradeContextEnrichment }) {
         <Item label="MA Alignment">
           <TrendBadge trend={sc.maAlignment} />
         </Item>
-        <Item label="Above MA20 / 50 / 200">
+        <Item label="Above MA20 / 50 / 150">
           <YesNo value={sc.aboveMa20} /> / <YesNo value={sc.aboveMa50} /> /{" "}
-          <YesNo value={sc.aboveMa200} />
+          <YesNo value={sc.aboveMa150 ?? null} />
         </Item>
-        <Item label="Dist MA20 / 50 / 200">
+        <Item label="Dist MA20 / 50 / 150">
           {pct(sc.distanceFromMa20Pct, 1)} / {pct(sc.distanceFromMa50Pct, 1)} /{" "}
-          {pct(sc.distanceFromMa200Pct, 1)}
+          {pct(sc.distanceFromMa150Pct ?? null, 1)}
         </Item>
         <Item label="Return 5d / 20d / 60d">
           {pct(sc.return5dPct, 1)} / {pct(sc.return20dPct, 1)} / {pct(sc.return60dPct, 1)}
@@ -117,6 +135,13 @@ function EnrichmentBody({ e }: { e: TradeContextEnrichment }) {
         <Item label="Supports Trade">
           <YesNo value={mc.marketSupportiveForTrade} />
         </Item>
+        <Item label="VIX at entry">
+          {mc.vix?.level != null ? formatNumber(mc.vix.level) : "—"}
+        </Item>
+        <Item label="VIX Regime">
+          <VixBadge regime={mc.vix?.regime ?? "UNKNOWN"} />
+        </Item>
+        <Item label="VIX 5d Change">{pct(mc.vix?.return5dPct ?? null, 1)}</Item>
       </Section>
 
       <Section title="Trade journey">

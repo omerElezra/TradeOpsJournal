@@ -8,6 +8,7 @@ import {
   computeRiskReward,
   computeStockContext,
   computeTradeJourney,
+  computeVixContext,
   enrichTradeContext,
   marketSupportiveForTrade,
   type DailyBarProvider,
@@ -152,7 +153,7 @@ describe("computeMaAlignment", () => {
     const up = computeStockContext(trendBars("2026-01-04", 250, 100, 0.5), null, 230);
     expect(up.maAlignment).toBe("BULLISH");
     expect(up.aboveMa20).toBe(true);
-    expect(up.aboveMa200).toBe(true);
+    expect(up.aboveMa150).toBe(true);
 
     const down = computeStockContext(trendBars("2026-01-04", 250, 250, -0.5), null, 120);
     expect(down.maAlignment).toBe("BEARISH");
@@ -160,7 +161,7 @@ describe("computeMaAlignment", () => {
 
   it("is UNKNOWN with insufficient history", () => {
     const ctx = computeStockContext(trendBars("2026-01-04", 30, 100, 0.5), null, 120);
-    expect(ctx.maAlignment).toBe("UNKNOWN"); // no MA50/MA200
+    expect(ctx.maAlignment).toBe("UNKNOWN"); // no MA50/MA150
     expect(ctx.aboveMa20).toBe(true); // MA20 still available
     expect(ctx.return60dPct).toBeNull();
   });
@@ -184,6 +185,16 @@ describe("market bias", () => {
     expect(combineMarketBias("BEARISH", "BEARISH")).toBe("BEARISH");
     expect(combineMarketBias("BULLISH", "BEARISH")).toBe("MIXED");
     expect(combineMarketBias("BULLISH", "UNKNOWN")).toBe("UNKNOWN");
+  });
+
+  it("classifies VIX regimes", () => {
+    expect(computeVixContext(trendBars("2026-01-04", 10, 12, 0)).regime).toBe("LOW");
+    expect(computeVixContext(trendBars("2026-01-04", 10, 18, 0)).regime).toBe("NORMAL");
+    expect(computeVixContext(trendBars("2026-01-04", 10, 25, 0)).regime).toBe("ELEVATED");
+    expect(computeVixContext(trendBars("2026-01-04", 10, 35, 0)).regime).toBe("EXTREME");
+    const empty = computeVixContext([]);
+    expect(empty.regime).toBe("UNKNOWN");
+    expect(empty.level).toBeNull();
   });
 
   it("maps bias to trade support", () => {
@@ -252,6 +263,7 @@ describe("enrichTradeContext", () => {
       if (symbol === "TEST") return stockBars;
       if (symbol === "SPY") return trendBars("2026-01-04", 250, 400, 1);
       if (symbol === "QQQ") return trendBars("2026-01-04", 250, 300, 1);
+      if (symbol === "^VIX") return trendBars("2026-01-04", 250, 18, 0);
       throw new Error(`unexpected symbol ${symbol}`);
     },
   };
@@ -265,6 +277,8 @@ describe("enrichTradeContext", () => {
     expect(e.stockContext.relativeVolume).toBe(3); // 3M vs 1M avg
     expect(e.marketContext.marketBias).toBe("BULLISH");
     expect(e.marketContext.marketSupportiveForTrade).toBe(true);
+    expect(e.marketContext.vix.level).toBe(18);
+    expect(e.marketContext.vix.regime).toBe("NORMAL");
     expect(e.tradeJourney.mfe).toBe(10);
     expect(e.tradeJourney.exitEfficiencyPct).toBe(80);
     expect(e.dataQuality.missingInputs).toEqual([]);
@@ -284,8 +298,9 @@ describe("enrichTradeContext", () => {
     expect(e.stockContext.atr14).toBeNull();
     expect(e.marketContext.marketBias).toBe("UNKNOWN");
     expect(e.marketContext.marketSupportiveForTrade).toBeNull();
+    expect(e.marketContext.vix.regime).toBe("UNKNOWN");
     expect(e.tradeJourney.mfe).toBeNull();
-    expect(e.dataQuality.missingMarketData.length).toBe(3);
+    expect(e.dataQuality.missingMarketData.length).toBe(4);
   });
 
   it("reports missing optional inputs", async () => {

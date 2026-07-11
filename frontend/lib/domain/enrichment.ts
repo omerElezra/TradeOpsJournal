@@ -54,11 +54,11 @@ export interface RiskReward {
 export interface StockContext {
   aboveMa20: boolean | null;
   aboveMa50: boolean | null;
-  aboveMa200: boolean | null;
+  aboveMa150: boolean | null;
   maAlignment: Trend;
   distanceFromMa20Pct: number | null;
   distanceFromMa50Pct: number | null;
-  distanceFromMa200Pct: number | null;
+  distanceFromMa150Pct: number | null;
   return5dPct: number | null;
   return20dPct: number | null;
   return60dPct: number | null;
@@ -79,9 +79,19 @@ export interface IndexContext {
   bias: Trend;
 }
 
+export type VixRegime = "LOW" | "NORMAL" | "ELEVATED" | "EXTREME" | "UNKNOWN";
+
+export interface VixContext {
+  /** Last VIX close before the entry day. */
+  level: number | null;
+  return5dPct: number | null;
+  regime: VixRegime;
+}
+
 export interface MarketContext {
   spy: IndexContext;
   qqq: IndexContext;
+  vix: VixContext;
   marketBias: Trend;
   marketSupportiveForTrade: boolean | null;
 }
@@ -239,11 +249,11 @@ export function computeMaAlignment(
   price: number,
   ma20: number | null,
   ma50: number | null,
-  ma200: number | null,
+  ma150: number | null,
 ): Trend {
-  if (ma20 == null || ma50 == null || ma200 == null) return "UNKNOWN";
-  if (price > ma20 && ma20 > ma50 && ma50 > ma200) return "BULLISH";
-  if (price < ma20 && ma20 < ma50 && ma50 < ma200) return "BEARISH";
+  if (ma20 == null || ma50 == null || ma150 == null) return "UNKNOWN";
+  if (price > ma20 && ma20 > ma50 && ma50 > ma150) return "BULLISH";
+  if (price < ma20 && ma20 < ma50 && ma50 < ma150) return "BEARISH";
   return "MIXED";
 }
 
@@ -261,7 +271,7 @@ export function computeStockContext(
   const closes = history.map((b) => b.close);
   const ma20 = sma(closes, 20);
   const ma50 = sma(closes, 50);
-  const ma200 = sma(closes, 200);
+  const ma150 = sma(closes, 150);
 
   const dist = (ma: number | null) =>
     ma != null && Math.abs(ma) > EPS ? r(((entryPrice - ma) / ma) * 100, 4) : null;
@@ -282,11 +292,11 @@ export function computeStockContext(
   return {
     aboveMa20: ma20 != null ? entryPrice > ma20 : null,
     aboveMa50: ma50 != null ? entryPrice > ma50 : null,
-    aboveMa200: ma200 != null ? entryPrice > ma200 : null,
-    maAlignment: computeMaAlignment(entryPrice, ma20, ma50, ma200),
+    aboveMa150: ma150 != null ? entryPrice > ma150 : null,
+    maAlignment: computeMaAlignment(entryPrice, ma20, ma50, ma150),
     distanceFromMa20Pct: dist(ma20),
     distanceFromMa50Pct: dist(ma50),
-    distanceFromMa200Pct: dist(ma200),
+    distanceFromMa150Pct: dist(ma150),
     return5dPct: nBarReturnPct(closes, 5),
     return20dPct: nBarReturnPct(closes, 20),
     return60dPct: nBarReturnPct(closes, 60),
@@ -324,6 +334,22 @@ export function computeIndexContext(symbol: string, history: Candle[]): IndexCon
     return5dPct: nBarReturnPct(closes, 5),
     return20dPct: nBarReturnPct(closes, 20),
     bias,
+  };
+}
+
+/** Volatility regime from the last VIX close before entry. */
+export function computeVixContext(history: Candle[]): VixContext {
+  const closes = history.map((b) => b.close);
+  const level = closes.length ? closes[closes.length - 1] : null;
+  let regime: VixRegime = "UNKNOWN";
+  if (level != null) {
+    regime =
+      level < 15 ? "LOW" : level < 20 ? "NORMAL" : level < 30 ? "ELEVATED" : "EXTREME";
+  }
+  return {
+    level: level != null ? r(level, 2) : null,
+    return5dPct: nBarReturnPct(closes, 5),
+    regime,
   };
 }
 
@@ -405,7 +431,9 @@ export function computeTradeJourney(
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 const INDEX_SYMBOLS = ["SPY", "QQQ"] as const;
-/** Calendar days of history fetched before entry (~280 trading days ≥ MA200 needs). */
+/** Yahoo/Polygon symbol for the CBOE volatility index (mapped per provider). */
+export const VIX_SYMBOL = "^VIX";
+/** Calendar days of history fetched before entry (~280 trading days ≥ MA150 needs). */
 const HISTORY_CALENDAR_DAYS = 420;
 
 function splitBars(bars: Candle[], entryDate: string, exitDate: string) {
@@ -470,21 +498,26 @@ export async function enrichTradeContext(
   const exitDate = utcDateKey(exitTs * 1000);
   const from = entryTs - HISTORY_CALENDAR_DAYS * 86400;
 
-  const fetchBars = async (symbol: string, to: number): Promise<Candle[] | null> => {
+  const fetchBars = async (
+    symbol: string,
+    to: number,
+    label = symbol,
+  ): Promise<Candle[] | null> => {
     try {
       return await provider.getDailyBars(symbol, from, to);
     } catch (err) {
       missingMarketData.push(
-        `${symbol}: ${err instanceof Error ? err.message : "daily bars unavailable"}`,
+        `${label}: ${err instanceof Error ? err.message : "daily bars unavailable"}`,
       );
       return null;
     }
   };
 
-  const [stockBars, spyBars, qqqBars] = await Promise.all([
+  const [stockBars, spyBars, qqqBars, vixBars] = await Promise.all([
     fetchBars(trade.symbol, exitTs + 2 * 86400),
     fetchBars(INDEX_SYMBOLS[0], entryTs + 86400),
     fetchBars(INDEX_SYMBOLS[1], entryTs + 86400),
+    fetchBars(VIX_SYMBOL, entryTs + 86400, "VIX"),
   ]);
 
   // Stock technical context + journey
@@ -492,7 +525,7 @@ export async function enrichTradeContext(
   let tradeJourney = computeTradeJourney([], trade, riskReward.plannedRiskPerShare);
   if (stockBars && stockBars.length) {
     const { history, entryBar, journey } = splitBars(stockBars, entryDate, exitDate);
-    if (history.length < 200)
+    if (history.length < 150)
       warnings.push(
         `Only ${history.length} daily bars before entry for ${trade.symbol} — long-window indicators may be null`,
       );
@@ -524,10 +557,16 @@ export async function enrichTradeContext(
   };
   const spy = indexContext("SPY", spyBars);
   const qqq = indexContext("QQQ", qqqBars);
+  const vix = computeVixContext(
+    vixBars?.length ? splitBars(vixBars, entryDate, exitDate).history : [],
+  );
+  if (vixBars && !vixBars.length)
+    missingMarketData.push("VIX: provider returned no daily bars");
   const marketBias = combineMarketBias(spy.bias, qqq.bias);
   const marketContext: MarketContext = {
     spy,
     qqq,
+    vix,
     marketBias,
     marketSupportiveForTrade: marketSupportiveForTrade(marketBias, trade.direction),
   };
