@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, Plus, Sparkles, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/query-keys";
+import { useEnrichment } from "@/hooks/use-enrichment";
+import type { TradeContextEnrichment } from "@/lib/domain/enrichment";
 import type { JournalEntry, TradeGroupDetail } from "@/types";
 
 // ─── Preset options ────────────────────────────────────────────────────────────
@@ -93,6 +95,69 @@ const MISTAKE_OPTIONS = [
   "Moved SL down",
 ];
 
+// ─── Auto-fill suggestions from measured data ─────────────────────────────────
+// Heuristics — never authoritative, so suggested values stay fully editable and
+// are flagged "auto" until the user touches them.
+
+function suggestFromEnrichment(e: TradeContextEnrichment): {
+  recentTrend?: string;
+  volumeVsTrend?: string;
+  maRelation?: string[];
+} {
+  const s: { recentTrend?: string; volumeVsTrend?: string; maRelation?: string[] } = {};
+  const sc = e.stockContext;
+
+  if (sc.maAlignment === "BULLISH") s.recentTrend = "Up";
+  else if (sc.maAlignment === "BEARISH") s.recentTrend = "Down";
+  else if (sc.maAlignment === "MIXED") s.recentTrend = "Consolidating";
+
+  const rv = sc.relativeVolume;
+  if (rv != null) {
+    if (rv >= 2.5) s.volumeVsTrend = "Climax volume";
+    else if (rv >= 1.1) s.volumeVsTrend = "Volume supports trend";
+    else if (rv < 0.9) s.volumeVsTrend = "Volume dropping (weakening)";
+  }
+
+  const ma: string[] = [];
+  if (sc.aboveMa20 != null) ma.push(sc.aboveMa20 ? "Above MA20" : "Below MA20");
+  const above150 = sc.aboveMa150 ?? null;
+  if (above150 != null) ma.push(above150 ? "Above MA150/200" : "Below MA150/200");
+  if (sc.distanceFromMa20Pct != null && sc.distanceFromMa20Pct > 7)
+    ma.push("Overextended from MA20");
+  if (ma.length) s.maRelation = ma;
+
+  return s;
+}
+
+/** Dollar risk = |entry − stop| × qty, once a stop is known. */
+function suggestRisk(trade: TradeGroupDetail, stopStr: string): string | null {
+  const stop = Number(stopStr);
+  if (!stopStr || !Number.isFinite(stop) || stop <= 0) return null;
+  return (Math.abs(trade.avgEntry - stop) * trade.qty).toFixed(2);
+}
+
+/** "Hit Stop"/"Hit Target" when the exit landed within 1.5% of (or beyond) the level. */
+function suggestExitReason(
+  trade: TradeGroupDetail,
+  stopStr: string,
+  targetStr: string,
+): string | null {
+  const exit = trade.avgExit;
+  if (exit == null) return null;
+  const long = trade.side === "LONG";
+  const near = (level: number) => Math.abs(exit - level) / level <= 0.015;
+
+  const stop = Number(stopStr);
+  if (stopStr && Number.isFinite(stop) && stop > 0) {
+    if (near(stop) || (long ? exit < stop : exit > stop)) return "Hit Stop";
+  }
+  const target = Number(targetStr);
+  if (targetStr && Number.isFinite(target) && target > 0) {
+    if (near(target) || (long ? exit > target : exit < target)) return "Hit Target";
+  }
+  return null;
+}
+
 // ─── Small building blocks ─────────────────────────────────────────────────────
 
 const chipBase =
@@ -103,11 +168,25 @@ const chipOn = `${chipBase} border-primary/50 bg-primary/15 text-primary`;
 const inputCls =
   "h-8 rounded-md border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  auto,
+  children,
+}: {
+  label: string;
+  auto?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
+        {auto && (
+          <span className="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-px text-[10px] normal-case text-primary">
+            <Sparkles className="h-2.5 w-2.5" />
+            auto
+          </span>
+        )}
       </p>
       {children}
     </div>
@@ -297,14 +376,16 @@ function NumberField({
   value,
   onChange,
   placeholder,
+  auto,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  auto?: boolean;
 }) {
   return (
-    <Field label={label}>
+    <Field label={label} auto={auto}>
       <input
         type="number"
         step="any"
@@ -375,12 +456,95 @@ function toDraft(j: JournalEntry | null): Draft {
 export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(true);
+  const [moreOpen, setMoreOpen] = React.useState(() => {
+    const j = trade.journal;
+    return Boolean(
+      j?.candlePattern || j?.openGaps?.length || j?.supportResFib?.length,
+    );
+  });
   const [draft, setDraft] = React.useState<Draft>(() => toDraft(trade.journal));
   const [saved, setSaved] = React.useState<Draft>(() => toDraft(trade.journal));
+  /** Fields currently holding an auto-suggested value the user hasn't touched. */
+  const [autoKeys, setAutoKeys] = React.useState<Set<keyof Draft>>(new Set());
+  const touched = React.useRef<Set<keyof Draft>>(new Set());
+  const draftRef = React.useRef(draft);
+  draftRef.current = draft;
+
+  const { data: enrichmentRow } = useEnrichment(trade.id);
+  const enrichment = enrichmentRow?.enrichment ?? null;
+
+  // Pre-fill empty fields once from measured data (Trade Context + trade plan).
+  const prefilled = React.useRef(false);
+  React.useEffect(() => {
+    if (!enrichment || prefilled.current) return;
+    prefilled.current = true;
+
+    const d = draftRef.current;
+    const updates: Partial<Draft> = {};
+    const auto: (keyof Draft)[] = [];
+    const s = suggestFromEnrichment(enrichment);
+
+    if (s.recentTrend && !d.recentTrend) {
+      updates.recentTrend = s.recentTrend;
+      auto.push("recentTrend");
+    }
+    if (s.volumeVsTrend && !d.volumeVsTrend) {
+      updates.volumeVsTrend = s.volumeVsTrend;
+      auto.push("volumeVsTrend");
+    }
+    if (s.maRelation && d.maRelation.length === 0) {
+      updates.maRelation = s.maRelation;
+      auto.push("maRelation");
+    }
+    const risk = suggestRisk(trade, d.plannedStop);
+    if (risk != null && !d.riskAmount) {
+      updates.riskAmount = risk;
+      auto.push("riskAmount");
+    }
+    const exit = suggestExitReason(trade, d.plannedStop, d.plannedTarget);
+    if (exit && !d.exitReason) {
+      updates.exitReason = exit;
+      auto.push("exitReason");
+    }
+
+    if (auto.length) {
+      setDraft((prev) => ({ ...prev, ...updates }));
+      setAutoKeys(new Set(auto));
+    }
+  }, [enrichment, trade]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
-    setDraft((d) => ({ ...d, [key]: value }));
+
+  /** User edit: value wins, "auto" flag drops; stop/target edits re-derive risk & exit. */
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    touched.current.add(key);
+    const next = { ...draftRef.current, [key]: value };
+    const nextAuto = new Set(autoKeys);
+    nextAuto.delete(key);
+
+    if (key === "plannedStop" && !touched.current.has("riskAmount")) {
+      const risk = suggestRisk(trade, next.plannedStop);
+      if (risk != null) {
+        next.riskAmount = risk;
+        nextAuto.add("riskAmount");
+      }
+    }
+    if (
+      (key === "plannedStop" || key === "plannedTarget") &&
+      !touched.current.has("exitReason")
+    ) {
+      const exit = suggestExitReason(trade, next.plannedStop, next.plannedTarget);
+      if (exit) {
+        next.exitReason = exit;
+        nextAuto.add("exitReason");
+      }
+    }
+
+    setDraft(next);
+    setAutoKeys(nextAuto);
+  };
+
+  const isAuto = (key: keyof Draft) => autoKeys.has(key);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -436,56 +600,45 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
       </CardHeader>
       {open && (
         <CardContent className="space-y-6">
-          {/* ── Pre-Entry Checklist ── */}
+          {/* ── Market read (auto-filled from Trade Context, editable) ── */}
           <section className="space-y-4">
-            <SectionTitle>Pre-Entry Checklist</SectionTitle>
-            <Field label="Candle pattern">
-              <SingleChoice
-                options={CANDLE_OPTIONS}
-                value={draft.candlePattern}
-                onChange={(v) => set("candlePattern", v)}
-              />
-            </Field>
-            <Field label="Recent trend">
+            <SectionTitle>Market Read</SectionTitle>
+            {enrichment ? (
+              <p className="text-xs text-muted-foreground">
+                Pre-filled from measured Trade Context data — review and correct if
+                the chart told you otherwise.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Compute Trade Context above to pre-fill this section automatically.
+              </p>
+            )}
+            <Field label="Recent trend" auto={isAuto("recentTrend")}>
               <SingleChoice
                 options={TREND_OPTIONS}
                 value={draft.recentTrend}
                 onChange={(v) => set("recentTrend", v)}
               />
             </Field>
-            <Field label="Volume vs trend">
+            <Field label="Volume vs trend" auto={isAuto("volumeVsTrend")}>
               <SingleChoice
                 options={VOLUME_OPTIONS}
                 value={draft.volumeVsTrend}
                 onChange={(v) => set("volumeVsTrend", v)}
               />
             </Field>
-            <Field label="Moving averages">
+            <Field label="Moving averages" auto={isAuto("maRelation")}>
               <MultiChoice
                 options={MA_OPTIONS}
                 values={draft.maRelation}
                 onChange={(v) => set("maRelation", v)}
               />
             </Field>
-            <Field label="Open gaps">
-              <MultiChoice
-                options={GAP_OPTIONS}
-                values={draft.openGaps}
-                onChange={(v) => set("openGaps", v)}
-              />
-            </Field>
-            <Field label="Support / Resistance / Fibonacci">
-              <MultiChoice
-                options={LEVEL_OPTIONS}
-                values={draft.supportResFib}
-                onChange={(v) => set("supportResFib", v)}
-              />
-            </Field>
           </section>
 
-          {/* ── Planning & Setup ── */}
+          {/* ── Plan ── */}
           <section className="space-y-4">
-            <SectionTitle>Planning &amp; Setup</SectionTitle>
+            <SectionTitle>Plan</SectionTitle>
             <Field label="Technical setup">
               <SingleChoice
                 options={SETUP_OPTIONS}
@@ -510,7 +663,8 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
                 label="Risk amount ($)"
                 value={draft.riskAmount}
                 onChange={(v) => set("riskAmount", v)}
-                placeholder="0.00"
+                placeholder="auto from stop"
+                auto={isAuto("riskAmount")}
               />
             </div>
             <Field label="Conviction level">
@@ -533,7 +687,7 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
                 onChange={(v) => set("entryReason", v)}
               />
             </Field>
-            <Field label="Exit reason">
+            <Field label="Exit reason" auto={isAuto("exitReason")}>
               <SingleChoice
                 options={EXIT_REASON_OPTIONS}
                 value={draft.exitReason}
@@ -578,6 +732,50 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
             </Field>
           </section>
 
+          {/* ── More (optional, subjective chart details) ── */}
+          <section className="space-y-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between border-b border-border pb-1.5 text-sm font-semibold"
+              onClick={() => setMoreOpen((o) => !o)}
+            >
+              <span>
+                More{" "}
+                <span className="font-normal text-muted-foreground">(optional)</span>
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform ${
+                  moreOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            {moreOpen && (
+              <>
+                <Field label="Candle pattern">
+                  <SingleChoice
+                    options={CANDLE_OPTIONS}
+                    value={draft.candlePattern}
+                    onChange={(v) => set("candlePattern", v)}
+                  />
+                </Field>
+                <Field label="Open gaps">
+                  <MultiChoice
+                    options={GAP_OPTIONS}
+                    values={draft.openGaps}
+                    onChange={(v) => set("openGaps", v)}
+                  />
+                </Field>
+                <Field label="Support / Resistance / Fibonacci">
+                  <MultiChoice
+                    options={LEVEL_OPTIONS}
+                    values={draft.supportResFib}
+                    onChange={(v) => set("supportResFib", v)}
+                  />
+                </Field>
+              </>
+            )}
+          </section>
+
           {mutation.isError && (
             <p className="rounded-md border border-negative/30 bg-negative/10 px-3 py-2 text-xs text-negative">
               {mutation.error instanceof Error
@@ -587,6 +785,12 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
           )}
 
           <div className="flex items-center justify-end gap-2">
+            {autoKeys.size > 0 && dirty && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Sparkles className="h-3 w-3" />
+                {autoKeys.size} auto-filled — review, then save
+              </span>
+            )}
             {!dirty && !mutation.isPending && trade.journal && (
               <span className="text-xs text-muted-foreground">Saved</span>
             )}
