@@ -2,132 +2,35 @@
 
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus, Sparkles, X } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/query-keys";
 import { useEnrichment } from "@/hooks/use-enrichment";
-import type { TradeContextEnrichment } from "@/lib/domain/enrichment";
+import {
+  Field,
+  MultiChoice,
+  NumberField,
+  Scale,
+  SectionTitle,
+  SingleChoice,
+} from "@/components/journal/form-controls";
+import {
+  CANDLE_OPTIONS,
+  EMOTION_OPTIONS,
+  ENTRY_CONFIRMATION_OPTIONS,
+  EXIT_REASON_OPTIONS,
+  GAP_OPTIONS,
+  LEVEL_OPTIONS,
+  MA_OPTIONS,
+  MISTAKE_OPTIONS,
+  SETUP_OPTIONS,
+  TREND_OPTIONS,
+  VOLUME_OPTIONS,
+  suggestFromStockContext,
+} from "@/components/journal/journal-presets";
 import type { JournalEntry, TradeGroupDetail } from "@/types";
-
-// ─── Preset options ────────────────────────────────────────────────────────────
-
-const CANDLE_OPTIONS = [
-  "Hammer",
-  "Doji",
-  "Bullish Engulfing",
-  "Bearish Engulfing",
-  "Inverted Hammer",
-  "Marubozu",
-  "None",
-];
-
-const TREND_OPTIONS = ["Up", "Down", "Consolidating"];
-
-const VOLUME_OPTIONS = [
-  "Volume supports trend",
-  "Volume dropping (weakening)",
-  "Climax volume",
-];
-
-const MA_OPTIONS = [
-  "Above MA20",
-  "Below MA20",
-  "Bouncing on MA20",
-  "Reclaiming MA20",
-  "Overextended from MA20",
-  "Above MA150/200",
-  "Below MA150/200",
-  "Trapped between MAs",
-];
-
-const GAP_OPTIONS = ["Open gap upside", "Open gap downside"];
-
-const LEVEL_OPTIONS = [
-  "Near strong support",
-  "Breaking resistance",
-  "Under near resistance",
-  "On key Fibonacci",
-];
-
-const SETUP_OPTIONS = [
-  "VCP",
-  "Cup & Handle",
-  "Breakout",
-  "Pullback",
-  "Flag/Pennant",
-  "Double Bottom/Top",
-  "Fakeout",
-];
-
-const ENTRY_REASON_OPTIONS = [
-  "Critical resistance break",
-  "MA bounce",
-  "Planned execution",
-  "Anticipating early",
-  "FOMO",
-  "Alert",
-];
-
-const EXIT_REASON_OPTIONS = [
-  "Hit Target",
-  "Hit Stop",
-  "Broke MA",
-  "Fear/Early exit",
-  "Time stop",
-];
-
-const EMOTION_OPTIONS = [
-  "Calm",
-  "Anxiety",
-  "Boredom",
-  "Overconfidence",
-  "FOMO",
-  "Frustration",
-];
-
-const MISTAKE_OPTIONS = [
-  "No mistakes (Perfect Execution)",
-  "Chasing market",
-  "Failed to take profit",
-  "Overtrading",
-  "Moved SL down",
-];
-
-// ─── Auto-fill suggestions from measured data ─────────────────────────────────
-// Heuristics — never authoritative, so suggested values stay fully editable and
-// are flagged "auto" until the user touches them.
-
-function suggestFromEnrichment(e: TradeContextEnrichment): {
-  recentTrend?: string;
-  volumeVsTrend?: string;
-  maRelation?: string[];
-} {
-  const s: { recentTrend?: string; volumeVsTrend?: string; maRelation?: string[] } = {};
-  const sc = e.stockContext;
-
-  if (sc.maAlignment === "BULLISH") s.recentTrend = "Up";
-  else if (sc.maAlignment === "BEARISH") s.recentTrend = "Down";
-  else if (sc.maAlignment === "MIXED") s.recentTrend = "Consolidating";
-
-  const rv = sc.relativeVolume;
-  if (rv != null) {
-    if (rv >= 2.5) s.volumeVsTrend = "Climax volume";
-    else if (rv >= 1.1) s.volumeVsTrend = "Volume supports trend";
-    else if (rv < 0.9) s.volumeVsTrend = "Volume dropping (weakening)";
-  }
-
-  const ma: string[] = [];
-  if (sc.aboveMa20 != null) ma.push(sc.aboveMa20 ? "Above MA20" : "Below MA20");
-  const above150 = sc.aboveMa150 ?? null;
-  if (above150 != null) ma.push(above150 ? "Above MA150/200" : "Below MA150/200");
-  if (sc.distanceFromMa20Pct != null && sc.distanceFromMa20Pct > 7)
-    ma.push("Overextended from MA20");
-  if (ma.length) s.maRelation = ma;
-
-  return s;
-}
 
 /** Dollar risk = |entry − stop| × qty, once a stop is known. */
 function suggestRisk(trade: TradeGroupDetail, stopStr: string): string | null {
@@ -156,255 +59,6 @@ function suggestExitReason(
     if (near(target) || (long ? exit > target : exit < target)) return "Hit Target";
   }
   return null;
-}
-
-// ─── Small building blocks ─────────────────────────────────────────────────────
-
-const chipBase =
-  "rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-const chipOff = `${chipBase} border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground`;
-const chipOn = `${chipBase} border-primary/50 bg-primary/15 text-primary`;
-
-const inputCls =
-  "h-8 rounded-md border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring";
-
-function Field({
-  label,
-  auto,
-  children,
-}: {
-  label: string;
-  auto?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-        {auto && (
-          <span className="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-px text-[10px] normal-case text-primary">
-            <Sparkles className="h-2.5 w-2.5" />
-            auto
-          </span>
-        )}
-      </p>
-      {children}
-    </div>
-  );
-}
-
-/** Single choice chip group with an "Other…" free-text option. */
-function SingleChoice({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[];
-  value: string | null;
-  onChange: (v: string | null) => void;
-}) {
-  const isCustom = value != null && !options.includes(value);
-  const [showOther, setShowOther] = React.useState(isCustom);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            className={value === opt ? chipOn : chipOff}
-            onClick={() => {
-              setShowOther(false);
-              onChange(value === opt ? null : opt);
-            }}
-          >
-            {opt}
-          </button>
-        ))}
-        <button
-          type="button"
-          className={showOther || isCustom ? chipOn : chipOff}
-          onClick={() => {
-            if (showOther || isCustom) {
-              setShowOther(false);
-              if (isCustom) onChange(null);
-            } else {
-              setShowOther(true);
-              if (!isCustom) onChange(null);
-            }
-          }}
-        >
-          Other…
-        </button>
-      </div>
-      {(showOther || isCustom) && (
-        <input
-          autoFocus
-          value={isCustom ? value : ""}
-          onChange={(e) => onChange(e.target.value || null)}
-          placeholder="Type a custom value…"
-          className={`${inputCls} w-full max-w-xs`}
-        />
-      )}
-    </div>
-  );
-}
-
-/** Multi-select chip group with an "Other…" free-text adder. */
-function MultiChoice({
-  options,
-  values,
-  onChange,
-}: {
-  options: string[];
-  values: string[];
-  onChange: (v: string[]) => void;
-}) {
-  const [showOther, setShowOther] = React.useState(false);
-  const [draft, setDraft] = React.useState("");
-  const customValues = values.filter((v) => !options.includes(v));
-
-  const toggle = (opt: string) =>
-    onChange(
-      values.includes(opt) ? values.filter((v) => v !== opt) : [...values, opt],
-    );
-
-  const addCustom = () => {
-    const v = draft.trim();
-    if (v && !values.includes(v)) onChange([...values, v]);
-    setDraft("");
-  };
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            className={values.includes(opt) ? chipOn : chipOff}
-            onClick={() => toggle(opt)}
-          >
-            {opt}
-          </button>
-        ))}
-        {customValues.map((v) => (
-          <button
-            key={v}
-            type="button"
-            className={`${chipOn} inline-flex items-center gap-1`}
-            onClick={() => onChange(values.filter((x) => x !== v))}
-          >
-            {v}
-            <X className="h-3 w-3" />
-          </button>
-        ))}
-        <button
-          type="button"
-          className={showOther ? chipOn : chipOff}
-          onClick={() => setShowOther((s) => !s)}
-        >
-          Other…
-        </button>
-      </div>
-      {showOther && (
-        <div className="flex items-center gap-1.5">
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addCustom();
-              }
-            }}
-            placeholder="Type a custom value…"
-            className={`${inputCls} w-full max-w-xs`}
-          />
-          <Button variant="outline" size="sm" onClick={addCustom} className="gap-1">
-            <Plus className="h-3.5 w-3.5" />
-            Add
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** 1–10 button scale. Click the active value again to clear. */
-function Scale({
-  value,
-  onChange,
-  lowLabel,
-  highLabel,
-}: {
-  value: number | null;
-  onChange: (v: number | null) => void;
-  lowLabel: string;
-  highLabel: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1">
-        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-          <button
-            key={n}
-            type="button"
-            className={`h-8 w-8 rounded-md border text-xs tabular transition-colors ${
-              value === n
-                ? "border-primary/50 bg-primary/15 font-semibold text-primary"
-                : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            }`}
-            onClick={() => onChange(value === n ? null : n)}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-      <div className="flex max-w-[352px] justify-between text-[10px] text-muted-foreground">
-        <span>1 = {lowLabel}</span>
-        <span>10 = {highLabel}</span>
-      </div>
-    </div>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  auto,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  auto?: boolean;
-}) {
-  return (
-    <Field label={label} auto={auto}>
-      <input
-        type="number"
-        step="any"
-        min="0"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`${inputCls} w-32`}
-      />
-    </Field>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="border-b border-border pb-1.5 text-sm font-semibold">
-      {children}
-    </h3>
-  );
 }
 
 // ─── Form state ────────────────────────────────────────────────────────────────
@@ -482,7 +136,7 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
     const d = draftRef.current;
     const updates: Partial<Draft> = {};
     const auto: (keyof Draft)[] = [];
-    const s = suggestFromEnrichment(enrichment);
+    const s = suggestFromStockContext(enrichment.stockContext);
 
     if (s.recentTrend && !d.recentTrend) {
       updates.recentTrend = s.recentTrend;
@@ -636,9 +290,9 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
             </Field>
           </section>
 
-          {/* ── Plan ── */}
+          {/* ── Setup & Plan ── */}
           <section className="space-y-4">
-            <SectionTitle>Plan</SectionTitle>
+            <SectionTitle>Setup &amp; Plan</SectionTitle>
             <Field label="Technical setup">
               <SingleChoice
                 options={SETUP_OPTIONS}
@@ -680,9 +334,9 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
           {/* ── Execution & Psychology ── */}
           <section className="space-y-4">
             <SectionTitle>Execution &amp; Psychology</SectionTitle>
-            <Field label="Entry reason">
+            <Field label="Entry confirmation">
               <SingleChoice
-                options={ENTRY_REASON_OPTIONS}
+                options={ENTRY_CONFIRMATION_OPTIONS}
                 value={draft.entryReason}
                 onChange={(v) => set("entryReason", v)}
               />
@@ -723,6 +377,7 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
             </Field>
             <Field label="Notes">
               <textarea
+                dir="auto"
                 value={draft.notes}
                 onChange={(e) => set("notes", e.target.value)}
                 placeholder="General context, the story of the trade, what you saw…"
@@ -740,7 +395,7 @@ export function TradeJournalForm({ trade }: { trade: TradeGroupDetail }) {
               onClick={() => setMoreOpen((o) => !o)}
             >
               <span>
-                More{" "}
+                Chart Details{" "}
                 <span className="font-normal text-muted-foreground">(optional)</span>
               </span>
               <ChevronDown
