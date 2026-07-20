@@ -7,7 +7,7 @@ import { createHash } from "crypto";
  * shortest round-trip form (213.5 -> "213.5"). This MUST stay in sync with
  * the Python side so manual rows and IBKR rows hash identically.
  */
-export function canonNum(x: number): string {
+function canonNum(x: number): string {
   if (!Number.isFinite(x)) return "";
   return String(x);
 }
