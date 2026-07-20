@@ -430,13 +430,13 @@ export function computeTradeJourney(
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
-const INDEX_SYMBOLS = ["SPY", "QQQ"] as const;
+export const INDEX_SYMBOLS = ["SPY", "QQQ"] as const;
 /** Yahoo/Polygon symbol for the CBOE volatility index (mapped per provider). */
 export const VIX_SYMBOL = "^VIX";
 /** Calendar days of history fetched before entry (~280 trading days ≥ MA150 needs). */
-const HISTORY_CALENDAR_DAYS = 420;
+export const HISTORY_CALENDAR_DAYS = 420;
 
-function splitBars(bars: Candle[], entryDate: string, exitDate: string) {
+export function splitBars(bars: Candle[], entryDate: string, exitDate: string) {
   const history: Candle[] = [];
   const journey: Candle[] = [];
   let entryBar: Candle | null = null;

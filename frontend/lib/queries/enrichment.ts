@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import type { EnrichmentRow, TradeContextEnrichment } from "@/lib/domain/enrichment";
 
 // v2: stock context uses MA150 instead of MA200; market context gained VIX.
-export const ENRICHMENT_SCHEMA_VERSION = 2;
+const ENRICHMENT_SCHEMA_VERSION = 2;
 
 /** Upsert the computed enrichment for a trade keyed by (symbol, entry_time). */
 export async function upsertEnrichment(

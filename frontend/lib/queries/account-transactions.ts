@@ -2,7 +2,7 @@ import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 
 // Normalized category slug → human label. Mirrors CTRN_CATEGORY in scripts/ingest.py.
-export const CATEGORY_LABEL: Record<string, string> = {
+const CATEGORY_LABEL: Record<string, string> = {
   dividend: "Dividend",
   withholding_tax: "Withholding Tax",
   interest_paid: "Interest Paid",

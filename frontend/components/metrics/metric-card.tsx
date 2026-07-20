@@ -1,6 +1,8 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tip } from "@/components/journal/form-controls";
+import { METRIC_HELP } from "@/lib/help";
 import { cn } from "@/lib/utils";
 
 export interface MetricCardProps {
@@ -33,7 +35,14 @@ export function MetricCard({
     <Card className="h-28">
       <CardContent className="flex h-full flex-col justify-between p-5">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
+          {METRIC_HELP[label] ? (
+            <span className="group relative cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">
+              {label}
+              <Tip text={METRIC_HELP[label]} />
+            </span>
+          ) : (
+            label
+          )}
         </span>
 
         {isLoading ? (
