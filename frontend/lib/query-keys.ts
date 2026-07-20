@@ -1,4 +1,5 @@
 import type { AccountTxnQuery, CandleQuery, CashQuery, ExecutionQuery, Range, TradeQuery } from "@/types";
+import type { TradePlanQuery } from "@/lib/domain/pre-entry";
 
 export const qk = {
   metrics: (range: Range) => ["metrics", range] as const,
@@ -17,4 +18,6 @@ export const qk = {
   analytics: (range: Range) => ["analytics", range] as const,
   candles: (params: CandleQuery) => ["candles", params] as const,
   enrichment: (tradeId: string) => ["enrichment", tradeId] as const,
+  scoringRules: () => ["scoringRules"] as const,
+  tradePlans: (params: TradePlanQuery) => ["tradePlans", params] as const,
 };
