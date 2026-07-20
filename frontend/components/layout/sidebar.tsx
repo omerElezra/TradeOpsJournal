@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   CandlestickChart,
+  ClipboardCheck,
   LineChart,
   NotebookPen,
   Sparkles,
@@ -24,6 +25,7 @@ const NAV = [
   { href: "/account-transactions", label: "Account Activity", icon: Landmark },
   { href: "/analytics", label: "Analytics", icon: LineChart },
   { href: "/journal", label: "Journal", icon: NotebookPen },
+  { href: "/entry-check", label: "Entry Check", icon: ClipboardCheck },
   { href: "/insights", label: "AI Insights", icon: Sparkles },
 ];
 

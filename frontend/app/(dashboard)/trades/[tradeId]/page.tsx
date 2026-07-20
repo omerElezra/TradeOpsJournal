@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PnLCell, ResultBadge, SideBadge } from "@/components/table/cells";
 import { TradeJournalForm } from "@/components/journal/trade-journal-form";
+import { TradeContextCard } from "@/components/trades/trade-context-card";
 import { TradePriceChart } from "@/components/charts/trade-price-chart";
 import { useTrade } from "@/hooks/use-trades";
 import {
@@ -59,6 +60,8 @@ export default function TradeDetailPage() {
       </div>
 
       <TradePriceChart key={data.id} trade={data} />
+
+      <TradeContextCard key={`ctx-${data.id}`} trade={data} />
 
       <TradeJournalForm key={data.id} trade={data} />
 

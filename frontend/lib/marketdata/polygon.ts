@@ -12,9 +12,15 @@ const POLYGON_RANGE: Record<CandleInterval, { mult: number; unit: string }> = {
   "1d": { mult: 1, unit: "day" },
 };
 
-/** IBKR class-share symbols use a space ("BRK B"); Polygon uses a dot ("BRK.B"). */
+/**
+ * IBKR class-share symbols use a space ("BRK B"); Polygon uses a dot ("BRK.B").
+ * Yahoo-style index symbols ("^VIX") map to Polygon's indices namespace ("I:VIX"),
+ * which requires the (free) Indices plan on the API key.
+ */
 function toPolygonTicker(symbol: string): string {
-  return symbol.trim().replace(/\s+/g, ".");
+  const s = symbol.trim();
+  if (s.startsWith("^")) return `I:${s.slice(1)}`;
+  return s.replace(/\s+/g, ".");
 }
 
 interface PolygonAggsResponse {

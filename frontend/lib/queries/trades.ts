@@ -15,7 +15,7 @@ export function journalKey(symbol: string, entryTime: Date): string {
   return `${symbol}|${tsKey(entryTime)}`;
 }
 
-export async function fetchExecutions(start: Date, end: Date): Promise<RawExecution[]> {
+async function fetchExecutions(start: Date, end: Date): Promise<RawExecution[]> {
   const db = getSupabaseAdmin();
   const rows: Record<string, unknown>[] = [];
   const pageSize = 1000;
@@ -85,7 +85,7 @@ export async function fetchExecutionsPage(
   return [(data ?? []) as Record<string, unknown>[], count ?? 0];
 }
 
-export async function fetchJournalMap(
+async function fetchJournalMap(
   start: Date,
   end: Date,
 ): Promise<Map<string, Record<string, unknown>>> {

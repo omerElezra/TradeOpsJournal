@@ -31,7 +31,7 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /** IBKR class-share symbols use a space ("BRK B"); Yahoo uses a dash ("BRK-B"). */
-export function toYahooSymbol(symbol: string): string {
+function toYahooSymbol(symbol: string): string {
   return symbol.trim().replace(/\s+/g, "-");
 }
 
